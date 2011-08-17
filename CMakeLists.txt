@@ -9,6 +9,9 @@ link_directories(${Boost_LIBRARY_DIRS})
 find_package(ZLIB REQUIRED)
 include_directories(${ZLIB_INCLUDE_DIR})
 
+# Generic third-party library includes
+include_directories(third-party)
+
 # Add an Octree implementation.
 include_directories(third-party/octree)
 
@@ -28,7 +31,19 @@ add_library(c10t-image third-party/c10t/src/image/color.cpp)
 add_executable(voxel
 	main.cpp
 )
+
+# Fast Ray/Axis-Aligned Bounding Box Overlap Tests using Ray Slopes
+# http://jgt.akpeters.com/papers/EisemannEtAl07/
+add_library(rayslope
+	third-party/rayslope/aabox.cpp
+	third-party/rayslope/ray.cpp
+	third-party/rayslope/slope.cpp
+	third-party/rayslope/slopeint_div.cpp
+	third-party/rayslope/slopeint_mul.cpp
+)
+
 target_link_libraries(voxel
 	c10t-mc c10t-image
+	rayslope
 	${Boost_FILESYSTEM_LIBRARY} ${Boost_SYSTEM_LIBRARY}
 	${ZLIB_LIBRARY})
