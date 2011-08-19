@@ -1,6 +1,8 @@
 project(voxel CXX C)
 cmake_minimum_required(VERSION 2.8)
 
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall")
+
 # We need to boost libraries.
 find_package(Boost REQUIRED COMPONENTS filesystem system)
 include_directories(${Boost_INCLUDE_DIR})
