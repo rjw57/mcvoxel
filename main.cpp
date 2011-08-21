@@ -5,6 +5,8 @@
 #include <iostream>
 #include <stdexcept>
 
+#include <boost/foreach.hpp>
+
 #include <octree.h>
 
 #include <nbt/nbt.hpp>
@@ -17,6 +19,8 @@
 #include <rayslope/ray.h>
 #include <rayslope/slope.h>
 #include <rayslope/slopeint_mul.h>
+
+#include "octree.hpp"
 
 struct block_pos
 {
@@ -64,6 +68,20 @@ class RayCastingOctree : public Octree<T, AS>
 		}
 	}
 
+	template<typename ChildType>
+	struct child_intersection
+	{
+		ChildType child;
+		int x0, y0, z0, size;
+		float t;
+
+		child_intersection(const ChildType& child, int x0, int y0, int z0, int size, float t)
+			: child(child), x0(x0), y0(y0), z0(z0), size(size), t(t)
+		{ }
+
+		bool operator < (const child_intersection& rhs) const { return t < rhs.t; }
+	};
+
 	bool ray_branch_node_int(ray* r, OctreeBranch* n, int x0, int y0, int z0, int size, float* t, block_pos* pos)
 	{
 		aabox box;
@@ -75,9 +93,10 @@ class RayCastingOctree : public Octree<T, AS>
 
 		size >>= 1;
 
-		bool found_intersection = false;
 		float temp_t;
-		block_pos temp_pos;
+
+		std::vector< child_intersection<OctreeNode*> > intersections;
+		intersections.reserve(8);
 
 		for(int dx=0; dx<=1; ++dx)
 			for(int dy=0; dy<=1; ++dy)
@@ -87,27 +106,29 @@ class RayCastingOctree : public Octree<T, AS>
 					if(child_node == NULL)
 						continue;
 
-					if(!ray_node_int(r, child_node, x0 + dx*size, y0 + dy*size, z0 + dz*size,
-								size, &temp_t, &temp_pos))
+					int x1(x0+dx*size), y1(y0+dy*size), z1(z0+dz*size);
+					make_aabox(x1, y1, z1, x1+size, y1+size, z1+size, &box);
+
+					if(!slopeint_mul(r, &box, &temp_t))
 						continue;
 
-					if(found_intersection)
-					{
-						if(temp_t < *t)
-						{
-							*t = temp_t;
-							*pos = temp_pos;
-						}
-					}
-					else
-					{
-						found_intersection = true;
-						*t = temp_t;
-						*pos = temp_pos;
-					}
+					intersections.push_back(child_intersection<OctreeNode*>(child_node,
+								x1, y1, z1, size, temp_t));
 				}
 
-		return found_intersection;
+		if(intersections.size() == 0)
+			return false;
+
+		std::sort(intersections.begin(), intersections.end());
+
+		BOOST_FOREACH(const child_intersection<OctreeNode*>& intersection, intersections)
+		{
+			if(ray_node_int(r, intersection.child,
+						intersection.x0, intersection.y0, intersection.z0, intersection.size, t, pos))
+				return true;
+		}
+
+		return false;
 	}
 
 	bool ray_agg_node_int(ray* r, OctreeAggregate* n, int x0, int y0, int z0, int size, float* t, block_pos* pos)
@@ -180,12 +201,15 @@ class RayCastingOctree : public Octree<T, AS>
 	}
 };
 
-typedef RayCastingOctree<uint8_t, 8> block_octree;
+typedef RayCastingOctree<uint8_t, 1> block_octree;
+
+typedef octree::tree<uint8_t> block_tree;
 
 struct load_level : public std::unary_function<const mc::utils::level_coord&, void>
 {
-	load_level(boost::shared_ptr<mc::region> region, block_octree& octree)
-		: region(region), octree(octree)
+	load_level(boost::shared_ptr<mc::region> region,
+			block_octree& octree, block_tree& tree)
+		: region(region), octree(octree), tree(tree)
 	{ }
 
 	bool is_surrounded(nbt::Byte* bp, int x, int y, int z)
@@ -212,21 +236,7 @@ struct load_level : public std::unary_function<const mc::utils::level_coord&, vo
 
 		int32_t x(0), y(0), z(0);
 
-		int32_t start_x(level_info->get_x() + 1024), start_z(level_info->get_z() + 1024);
-		//std::cout << " - (" << start_x << "," << start_z << ")" << std::endl;
-
-		// convert surrounded blocks into air
-		for(y=1; y<127; ++y)
-			for(z=1; z<15; ++z)
-				for(x=1; x<15; ++x)
-				{
-					if(is_surrounded(blocks->values, x, y, z))
-					{
-						blocks->values[y + (128*z) + (128*16*x)] = mc::Air;
-					}
-				}
-
-		x = y = z = 0;
+		int32_t start_x((level_info->get_x() * 16) + 1024), start_z((level_info->get_z() * 16) + 1024);
 
 		for(int32_t idx(0); idx < blocks->length; ++idx)
 		{
@@ -239,7 +249,8 @@ struct load_level : public std::unary_function<const mc::utils::level_coord&, vo
 				if((x >= octree.size()) || (y >= octree.size()) || (z >= octree.size()))
 					break;
 				octree.set(start_x + x, y, start_z + z, block_id);
-				//std::cout << "(" << x << "," << y << "," << z << ") ";
+				tree.set(start_x + x, y, start_z + z, block_id);
+				// std::cout << "(" << x << "," << y << "," << z << ") ";
 			}
 
 			// go to next co-ord
@@ -257,6 +268,7 @@ struct load_level : public std::unary_function<const mc::utils::level_coord&, vo
 
 	boost::shared_ptr<mc::region>   region;
 	block_octree&                   octree;
+	block_tree&			tree;
 };
 
 struct out_pixel
@@ -281,6 +293,8 @@ int main(int argc, char** argv)
 
 	block_octree octree(4096, mc::Air);
 
+	block_tree tree(12, mc::Air);
+
 	mc::world world(argv[1]);
 
 	mc::region_iterator region_iterator(world.get_iterator());
@@ -295,7 +309,10 @@ int main(int argc, char** argv)
 		region->read_coords(level_coords);
 		std::cout << " - " << level_coords.size() << " level coords." << std::endl;
 
-		std::for_each(level_coords.begin(), level_coords.end(), load_level(region, octree));
+		std::for_each(level_coords.begin(), level_coords.end(), load_level(region, octree, tree));
+		std::cout << " - raw node count " << tree.nodes() << " nodes." << std::endl;
+		tree.compact();
+		std::cout << " - compacted node count " << tree.nodes() << " nodes." << std::endl;
 	}
 
 	std::cout << "Octree has a total of " << octree.nodes() << " nodes." << std::endl;
@@ -311,19 +328,52 @@ int main(int argc, char** argv)
 		block_pos pos;
 		ray r;
 
+		if((idx & 0xff) == 0)
+		{
+			std::cout << 100*idx/(w*h) << "%\r" << std::flush;
+		}
+
 		fx -= w>>1; fy -= h>>1;
 
-		float i(fx), j(fy), k(0.33f*w);
+		float i(fx), j(fy), k(0.5f*h);
 
 		float mag = sqrt(i*i + j*j + k*k);
 
-		make_ray(1044, 100, 1000, i/mag, j/mag, k/mag, &r);
+		make_ray(920, 80, 900, i/mag, j/mag, k/mag, &r);
 		if(octree.ray_int(&r, &t, &pos))
 		{
-			out->r = (octree.at(pos.x, pos.y, pos.x) << 3) && 0xff;
-			out->g = pos.y;
-			out->b = t;
-			//std::cout << t << std::endl;
+			uint8_t block_id = octree.at(pos.x, pos.y, pos.z);
+			assert(tree.get(pos.x, pos.y, pos.z) == block_id);
+			switch(block_id)
+			{
+				case mc::Stone:
+					out->r = out->g = out->b = 0x33;
+					break;
+				case mc::Grass:
+					out->r = 0x00; out->g = 0x7f; out->b = 0x00;
+					break;
+				case mc::Wood:
+				case mc::Log:
+					out->r = 0x30; out->g = 0x30; out->b = 0x00;
+					break;
+				case mc::Dirt:
+					out->r = 0x60; out->g = 0x60; out->b = 0x00;
+					break;
+				case mc::Sand:
+					out->r = 0xe0; out->g = 0xe0; out->b = 0x00;
+					break;
+				case mc::Water:
+				case mc::StationaryWater:
+					out->r = 0x00; out->g = 0x00; out->b = 0x80;
+					break;
+				case mc::Leaves:
+					out->r = 0x00; out->g = 0xff; out->b = 0x00;
+					break;
+				default:
+					//std::cout << "unknown block: 0x" << std::hex << (int) block_id << std::endl;
+					out->r = out->g = out->b = 0x7f;
+					break;
+			}
 		}
 		else
 		{
