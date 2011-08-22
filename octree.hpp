@@ -56,9 +56,20 @@ struct node
 		: min_loc(min_loc), log_2_size(log_2_size), value(value)
 	{ }
 
+	node(const node<T>& n)
+	{
+		assign_from(n);
+	}
+
 	~node()
 	{
 		join();
+	}
+
+	const node<T>& operator = (const node<T>& n)
+	{
+		assign_from(n);
+		return *this;
 	}
 
 	unsigned long size() const
@@ -312,6 +323,21 @@ struct node
 
 	protected:
 
+	void assign_from(const node<T>& n)
+	{
+		min_loc = n.min_loc;
+		log_2_size = n.log_2_size;
+		value = n.value;
+		children = n.children;
+
+		BOOST_FOREACH(node<T>*& child_entry, std::make_pair(children.begin(), children.end()))
+		{
+			if(child_entry == NULL)
+				continue;
+			child_entry = new node<T>(*child_entry);
+		}
+	}
+
 	void make_aabox(aabox* box) const
 	{
 		::make_aabox(min_loc.x, min_loc.y, min_loc.z,
@@ -386,6 +412,20 @@ class tree
 	tree(unsigned int log_2_size, const T& default_value = T())
 		: root_(new node<T>(location(0,0,0), log_2_size, default_value))
 	{ }
+
+	tree(unsigned int log_2_size, const location& min_loc, const T& default_value = T())
+		: root_(new node<T>(min_loc, log_2_size, default_value))
+	{ }
+
+	tree(const tree& t)
+		: root_(new node<T>(t.root_))
+	{ }
+
+	const tree& operator = (const tree& t)
+	{
+		root_ = std::auto_ptr< node<T> >(new node<T>(t.root_));
+		return *this;
+	}
 
 	const node<T>& root() const { return *root_; }
 
