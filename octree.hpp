@@ -1,12 +1,16 @@
 #ifndef _OCTREE_HPP
 #define _OCTREE_HPP
 
+#include <algorithm>
 #include <cassert>
 #include <stdexcept>
 #include <utility>
 #include <vector>
 
 #include <rayslope/aabox.h>
+#include <rayslope/ray.h>
+#include <rayslope/slope.h>
+#include <rayslope/slopeint_mul.h>
 
 namespace octree
 {
@@ -43,10 +47,10 @@ location operator - (const location& lhs, const location& rhs)
 template< typename T >
 struct node
 {
-	location		min_loc;
-	unsigned int		log_2_size;
-	T			value;
-	std::vector<node<T>*>	children; // empty => leaf node
+	location              min_loc;
+	unsigned int          log_2_size;
+	T                     value;
+	std::vector<node<T>*> children; // empty => leaf node
 
 	node(const location& min_loc, unsigned int log_2_size, const T& value)
 		: min_loc(min_loc), log_2_size(log_2_size), value(value)
@@ -55,13 +59,6 @@ struct node
 	~node()
 	{
 		join();
-	}
-
-	void make_aabox(aabox* box) const
-	{
-		make_aabox(min_loc.x, min_loc.y, min_loc.z,
-				min_loc.x+size(), min_loc.y+size(), min_loc.z+size(),
-				box);
 	}
 
 	unsigned long size() const
@@ -243,7 +240,96 @@ struct node
 		return count;
 	}
 
+	struct child_intersection
+	{
+		node<T>* node_ptr;
+		aabox    box;
+		float    t;
+
+		bool operator < (const child_intersection& rhs) const { return t < rhs.t; }
+	};
+
+	node<T>* ray_intersect(ray* r, float* t)
+	{
+		aabox node_box;
+		make_aabox(&node_box);
+
+		// if we don't intersect this node at all, return NULL
+		if(!slopeint_mul(r, &node_box, t))
+			return NULL;
+
+		// if this node is a leaf node, return it as the intersection
+		if(is_leaf())
+		{
+			if(value == mc::Air)
+				return NULL;
+			return this;
+		}
+
+		// try each child in turn
+		std::vector<child_intersection> intersections;
+		intersections.reserve(8);
+
+		for(size_t i=0; i<8; ++i)
+		{
+			child_intersection record;
+			make_child_aabox(i, &(record.box));
+
+			if(slopeint_mul(r, &(record.box), &(record.t)))
+			{
+				record.node_ptr = children[i];
+				intersections.push_back(record);
+			}
+		}
+
+		if(intersections.size() == 0)
+			return NULL;
+
+		// sort intersections by distance
+		std::sort(intersections.begin(), intersections.end());
+
+		// try intersections, nearest first
+		BOOST_FOREACH(const child_intersection& intersection, std::make_pair(intersections.begin(), intersections.end()))
+		{
+			if(intersection.node_ptr == NULL)
+			{
+				if(value == mc::Air)
+					return NULL;
+				*t = intersection.t;
+				return this;
+			}
+
+			node<T>* child_intersection = intersection.node_ptr->ray_intersect(r, t);
+			if(child_intersection != NULL)
+			{
+				return child_intersection;
+			}
+		}
+
+		// return no intersection
+		return NULL;
+	}
+
 	protected:
+
+	void make_aabox(aabox* box) const
+	{
+		::make_aabox(min_loc.x, min_loc.y, min_loc.z,
+				min_loc.x+size(), min_loc.y+size(), min_loc.z+size(),
+				box);
+	}
+
+	void make_child_aabox(size_t index, aabox* box) const
+	{
+		assert(log_2_size > 0);
+
+		location child_loc(child_min_loc(index));
+		unsigned long child_size = 1ul << (log_2_size-1);
+
+		::make_aabox(child_loc.x, child_loc.y, child_loc.z,
+				child_loc.x+child_size, child_loc.y+child_size, child_loc.z+child_size,
+				box);
+	}
 
 	void join()
 	{
@@ -257,8 +343,7 @@ struct node
 		children.clear();
 	}
 
-	
-	location child_min_loc(size_t index)
+	location child_min_loc(size_t index) const
 	{
 		location node_loc(min_loc);
 		long half_size = size() >> 1;
@@ -310,6 +395,10 @@ class tree
 	{
 		return root_->nodes_count_at_size(log_2_size);
 	}
+
+	long size() const { return root_->size(); }
+
+	node<T>* ray_intersect(ray* r, float* t) { return root_->ray_intersect(r, t); }
 
 	void compact() { root_->compact(); }
 
