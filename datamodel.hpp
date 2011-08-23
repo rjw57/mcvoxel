@@ -6,9 +6,37 @@
 namespace data
 {
 
+template<typename T>
 struct pixel
 {
-	uint8_t r,g,b;
+	T r,g,b;
+
+	pixel<T> operator + (const pixel<T>& rhs)
+	{
+		pixel<T> rv;
+		rv.r = r + rhs.r;
+		rv.g = g + rhs.g;
+		rv.b = b + rhs.b;
+		return rv;
+	}
+
+	pixel<T> operator / (const T& v)
+	{
+		pixel<T> rv;
+		rv.r = r / v;
+		rv.g = g / v;
+		rv.b = b / v;
+		return rv;
+	}
+
+	pixel<T> operator * (const T& v)
+	{
+		pixel<T> rv;
+		rv.r = r * v;
+		rv.g = g * v;
+		rv.b = b * v;
+		return rv;
+	}
 };
 
 }

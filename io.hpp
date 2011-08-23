@@ -9,7 +9,7 @@
 namespace io
 {
 
-void write_ppm(std::ostream& os, data::pixel* src, uint32_t w, uint32_t h);
+void write_ppm(std::ostream& os, data::pixel<uint8_t>* src, uint32_t w, uint32_t h);
 
 }
 

@@ -3,8 +3,12 @@
 #endif
 
 #include <algorithm>
+#include <cassert>
+#include <iostream>
 #include <stack>
+#include <stdexcept>
 #include <utility>
+#include <vector>
 
 #include <boost/foreach.hpp>
 #include <boost/tuple/tuple.hpp>
@@ -13,6 +17,8 @@
 #include <rayslope/ray.h>
 #include <rayslope/slope.h>
 #include <rayslope/slopeint_mul.h>
+
+#include <mc/blocks.hpp>
 
 #include "io.hpp"
 
@@ -82,6 +88,12 @@ template<typename T>
 octree<T>::octree(const octree<T>& tree)
 	: log_2_size_(tree.log_2_size_), first_loc_(tree.first_loc_), root_node_(tree.root_node_)
 { }
+
+template<typename T>
+octree<T>::octree(std::istream& is)
+{
+	is >> log_2_size_ >> first_loc_.x >> first_loc_.y >> first_loc_.z >> root_node_;
+}
 
 template<typename T>
 octree<T>::~octree()
@@ -270,20 +282,6 @@ struct intersection_result
 	bool operator < (const intersection_result& rhs) const { return distance < rhs.distance; }
 };
 
-struct extent
-{
-	location loc;
-	long size;
-
-	extent()
-		: loc(0,0,0), size(0)
-	{ }
-
-	extent(const location& loc, const long& size)
-		: loc(loc), size(size)
-	{ }
-};
-
 template<typename T>
 struct child_intersection
 {
@@ -301,7 +299,7 @@ struct child_intersection
 };
 
 template<typename T>
-bool octree<T>::ray_intersect(const ray& r, float& out_distance, location& out_loc, long& out_size) const
+bool octree<T>::ray_intersect(const ray& r, sub_location& out_sub_loc) const
 {
 	typedef boost::tuple<extent, const branch_or_leaf_node_t*, float> node_record;
 
@@ -342,9 +340,17 @@ bool octree<T>::ray_intersect(const ray& r, float& out_distance, location& out_l
 			if(*leaf == mc::Air)
 				continue;
 
-			out_distance = boost::get<2>(record);
-			out_loc = node_ext.loc;
-			out_size = node_ext.size;
+			sub_location sub_loc;
+			float distance = boost::get<2>(record);
+
+			sub_loc.coords[0] = transformed_ray.x + transformed_ray.i * distance;
+			sub_loc.coords[1] = transformed_ray.y + transformed_ray.j * distance;
+			sub_loc.coords[2] = transformed_ray.z + transformed_ray.k * distance;
+
+			sub_loc.node_extent = node_ext;
+
+			out_sub_loc = sub_loc;
+
 			return true;
 		}
 		else if(const branch_node_t* branch = boost::get<branch_node_t>(node_p))
@@ -386,4 +392,97 @@ bool octree<T>::ray_intersect(const ray& r, float& out_distance, location& out_l
 	return false;
 }
 
+template<typename T>
+std::ostream& octree<T>::serialise(std::ostream& os) const
+{
+	os << log_2_size_ << '\n';
+	os << first_loc_.x << ' ' << first_loc_.y << ' ' << first_loc_.z << '\n';
+
+	std::stack<const branch_or_leaf_node_t*> node_stack;
+	node_stack.push(&root_node_);
+
+	while(!node_stack.empty())
+	{
+		const branch_or_leaf_node_t* node_p = node_stack.top();
+		node_stack.pop();
+
+		if(const leaf_node_t* leaf_p = boost::get<leaf_node_t>(node_p))
+		{
+			os << 'L';
+			os.write(reinterpret_cast<char*>(const_cast<leaf_node_t*>(leaf_p)), sizeof(leaf_node_t));
+		}
+		else if(const branch_node_t* branch_p = boost::get<branch_node_t>(node_p))
+		{
+			os << 'B';
+			for(int i=0; i<8; ++i)
+			{
+				node_stack.push(&branch_p->children[7-i]);
+			}
+		}
+		else
+		{
+			assert(false);
+		}
+	}
+
+	os << std::endl;
+
+	return os;
+}
+
+template<typename T>
+std::istream& deserialise_node(std::istream& is, typename octree<T>::branch_or_leaf_node_t& node)
+{
+	char type;
+
+	is >> type;
+
+	switch(type)
+	{
+		case 'L':
+			{
+				typename octree<T>::leaf_node_t leaf;
+				is.read(reinterpret_cast<char*>(&leaf), sizeof(leaf));
+				node = leaf;
+			}
+			break;
+		case 'B':
+			{
+				typename octree<T>::branch_node_t branch;
+				for(int i=0; i<8; ++i)
+				{
+					deserialise_node<T>(is, branch.children[i]);
+				}
+				node = branch;
+			}
+			break;
+		default:
+			throw std::runtime_error(std::string("Unknown node type: ") + type);
+	}
+
+	return is;
+}
+
+template<typename T>
+std::istream& octree<T>::deserialise(std::istream& is)
+{
+	is >> log_2_size_;
+	is >> first_loc_.x >> first_loc_.y >> first_loc_.z;
+	deserialise_node<T>(is, root_node_);
+
+	return is;
+}
+
+}
+
+template<typename T>
+std::istream& operator >> (std::istream& is, typename octree::octree<T>& tree)
+{
+	return tree.deserialise(is);
+}
+
+template<typename T>
+std::ostream& operator << (std::ostream& os, const typename octree::octree<T>& tree)
+{
+	return tree.serialise(os);
 }

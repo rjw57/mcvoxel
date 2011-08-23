@@ -1,24 +1,11 @@
 #ifndef _OCTREE_HPP
 #define _OCTREE_HPP
 
-#include <algorithm>
-#include <cassert>
-#include <deque>
 #include <iostream>
-#include <memory>
-#include <stdexcept>
-#include <utility>
-#include <vector>
 
-#include <boost/foreach.hpp>
 #include <boost/variant.hpp>
 
-#include <rayslope/aabox.h>
 #include <rayslope/ray.h>
-#include <rayslope/slope.h>
-#include <rayslope/slopeint_mul.h>
-
-#include <mc/blocks.hpp>
 
 namespace octree
 {
@@ -43,9 +30,29 @@ struct branch_node
 	branch_or_leaf_node_t children[8];
 
 	// branch nodes must be given a default value.
-	branch_node(const T& default_value);
+	branch_node(const T& default_value = T());
 
 	~branch_node();
+};
+
+struct extent
+{
+	location loc;
+	long size;
+
+	extent()
+		: loc(0,0,0), size(0)
+	{ }
+
+	extent(const location& loc, const long& size)
+		: loc(loc), size(size)
+	{ }
+};
+
+struct sub_location
+{
+	float  coords[3];
+	extent node_extent;
 };
 
 template<typename T>
@@ -59,6 +66,7 @@ class octree
 
 	octree(int log_2_size, const location& first_loc = location(0,0,0), const T& default_value = T());
 	octree(const octree<T>& tree);
+	octree(std::istream& os);
 	~octree();
 	const octree<T>& operator = (const octree<T>& tree);
 
@@ -70,11 +78,16 @@ class octree
 
 	const location& first_loc() const { return first_loc_; }
 	long size() const { return 1l << log_2_size_; }
-	long node_count() const;
+	long log_2_size() const { return log_2_size_; }
+	const branch_or_leaf_node_t& root() const { return root_node_; }
 
+	long node_count() const;
 	void compact();
 
-	bool ray_intersect(const ray& r, float& out_distance, location& out_loc, long& out_size) const;
+	bool ray_intersect(const ray& r, sub_location& out_sub_loc) const;
+
+	std::ostream& serialise(std::ostream& os) const;
+	std::istream& deserialise(std::istream& os);
 
 	protected:
 
@@ -89,6 +102,12 @@ class octree
 };
 
 }
+
+template<typename T>
+std::istream& operator >> (std::istream& is, typename octree::octree<T>& tree);
+
+template<typename T>
+std::ostream& operator << (std::istream& os, const typename octree::octree<T>& tree);
 
 #define INSIDE_OCTREE_HPP
 #include "octree.tcc"
