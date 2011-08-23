@@ -23,12 +23,10 @@
 #include "io.hpp"
 #include "octree.hpp"
 
-typedef octree::tree<uint8_t> block_tree;
-
 struct load_level : public std::unary_function<const mc::utils::level_coord&, void>
 {
-	load_level(boost::shared_ptr<mc::region> region, block_tree& tree)
-		: region(region), tree(tree)
+	load_level(boost::shared_ptr<mc::region> region, octree::octree<uint8_t>& octree)
+		: region(region), octree(octree)
 	{ }
 
 	void operator() (const mc::utils::level_coord& coord)
@@ -51,9 +49,7 @@ struct load_level : public std::unary_function<const mc::utils::level_coord&, vo
 			if(block_id != mc::Air)
 			{
 				octree::location loc(x + start_x, y, z + start_z);
-				if(!tree.root().contains(loc))
-					continue;
-				tree.set(loc, block_id);
+				octree.set(loc, block_id);
 			}
 
 			// go to next co-ord
@@ -70,40 +66,38 @@ struct load_level : public std::unary_function<const mc::utils::level_coord&, vo
 	}
 
 	boost::shared_ptr<mc::region>   region;
-	block_tree&                     tree;
+	octree::octree<uint8_t>&        octree;
 };
 
-struct intersection_record
-{
-	octree::node<uint8_t>* node;
-	float                  t;
-	bool operator < (const intersection_record& rhs) const { return t < rhs.t; }
-};
-
-octree::node<uint8_t>* cast_ray(ray* r, const std::vector<block_tree>& trees, float *t)
+template<typename T>
+const T* cast_ray(const ray& r, const std::vector< octree::octree<T> >& trees, float& out_distance)
 {
 	float min_t = 0.f;
-	octree::node<uint8_t>* closest_node = NULL;
+	const T* closest_node_p = NULL;
 
-	BOOST_FOREACH(const block_tree& tree, trees)
+	BOOST_FOREACH(const octree::octree<T>& tree, trees)
 	{
 		float temp_t;
-		octree::node<uint8_t>* node = tree.ray_intersect(r, &temp_t);
-		if(node == NULL)
+		octree::location temp_loc(0,0,0);
+		long temp_size;
+
+		if(!tree.ray_intersect(r, temp_t, temp_loc, temp_size))
 			continue;
 
-		if((closest_node == NULL) || (temp_t < min_t))
+		if((closest_node_p == NULL) || (temp_t < min_t))
 		{
-			closest_node = node;
+			closest_node_p = &(tree.get(temp_loc));
 			min_t = temp_t;
 		}
 	}
 
-	*t = min_t;
-	return closest_node;
+	out_distance = min_t;
+	return closest_node_p;
 }
 
-inline bool is_surrounded(const block_tree& tree, const octree::location& loc)
+
+template<typename T>
+bool is_surrounded(octree::octree<T>& tree, const octree::location& loc)
 {
 	if(tree.get(loc.x-1, loc.y, loc.z) == mc::Air) return false;
 	if(tree.get(loc.x+1, loc.y, loc.z) == mc::Air) return false;
@@ -114,14 +108,15 @@ inline bool is_surrounded(const block_tree& tree, const octree::location& loc)
 	return true;
 }
 
-void sparsify(block_tree& tree)
+template<typename T>
+void sparsify(octree::octree<T>& tree)
 {
-	octree::location first_loc = tree.root().min_loc;
+	octree::location first_loc = tree.first_loc();
 	octree::location last_loc(first_loc);
 
-	last_loc.x += tree.root().size();
-	last_loc.y += tree.root().size();
-	last_loc.z += tree.root().size();
+	last_loc.x += tree.size();
+	last_loc.y += tree.size();
+	last_loc.z += tree.size();
 
 	for(int x=first_loc.x+1; x<last_loc.x-1; ++x)
 		for(int y=1; y<128-1; ++y)
@@ -140,8 +135,10 @@ int main(int argc, char** argv)
 		return 1;
 	}
 
-	std::vector<block_tree> trees;
+	std::vector< octree::octree<uint8_t> > octrees;
 	mc::world world(argv[1]);
+
+	std::cout << "node size: " << sizeof(octree::octree<uint8_t>::branch_or_leaf_node_t) << " bytes" << std::endl;
 
 	mc::region_iterator region_iterator(world.get_iterator());
 	std::deque<mc::utils::level_coord> level_coords;
@@ -157,21 +154,16 @@ int main(int argc, char** argv)
 
 		mc::utils::level_coord rc = mc::utils::path_to_region_coord(region->get_path());
 		octree::location start_coord = octree::location(rc.get_x() * 16, 0, rc.get_z() * 16);
-		trees.push_back(block_tree(9, start_coord, mc::Air));
 
-		std::for_each(level_coords.begin(), level_coords.end(), load_level(region, trees.back()));
-		std::cout << " - raw node count " << trees.back().nodes() << " nodes." << std::endl;
+		octrees.push_back(octree::octree<uint8_t>(9, start_coord, mc::Air));
+
+		std::for_each(level_coords.begin(), level_coords.end(), load_level(region, octrees.back()));
+		std::cout << " - raw node count " << octrees.back().node_count() << " nodes." << std::endl;
 		std::cout << "   ... sparsifying" << std::endl;
-		sparsify(trees.back());
+		//sparsify(octrees.back());
 		std::cout << "   ... compacting" << std::endl;
-		trees.back().compact();
-		std::cout << " - compacted and sparsified node count " << trees.back().nodes() << " nodes." << std::endl;
-	}
-
-	std::ofstream output("foo.dat");
-	BOOST_FOREACH(const block_tree& tree, trees)
-	{
-		output << tree;
+		octrees.back().compact();
+		std::cout << " - compacted and sparsified node count " << octrees.back().node_count() << " nodes." << std::endl;
 	}
 
 	const int w=640, h=480;
@@ -196,11 +188,11 @@ int main(int argc, char** argv)
 
 		float mag = sqrt(i*i + j*j + k*k);
 
-		make_ray(50, 90, -10, i/mag, j/mag, k/mag, &r);
-		octree::node<uint8_t>* int_node = cast_ray(&r, trees, &t);
-		if(int_node != NULL)
+		make_ray(200, 90, -10, i/mag, j/mag, k/mag, &r);
+		const uint8_t* block_id_p = cast_ray(r, octrees, t);
+		if(block_id_p != NULL)
 		{
-			uint8_t block_id = int_node->value;
+			uint8_t block_id = *block_id_p;
 			switch(block_id)
 			{
 				case mc::Stone:

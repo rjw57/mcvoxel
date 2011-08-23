@@ -11,3 +11,9 @@ void write_ppm(std::ostream& os, data::pixel* src, uint32_t w, uint32_t h)
 }
 
 }
+
+std::ostream& operator << (std::ostream& os, const octree::location& loc)
+{
+	os << "(" << loc.x << "," << loc.y << "," << loc.z << ")";
+	return os;
+}

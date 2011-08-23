@@ -13,8 +13,10 @@ void write_ppm(std::ostream& os, data::pixel* src, uint32_t w, uint32_t h);
 
 }
 
-template< typename T >
-std::ostream& operator << (std::ostream& os, const octree::tree<T>& tree);
+//template< typename T >
+//std::ostream& operator << (std::ostream& os, const octree::tree<T>& tree);
+
+std::ostream& operator << (std::ostream& os, const octree::location& loc);
 
 #define INSIDE_IO_HPP
 #include "io.tcc"

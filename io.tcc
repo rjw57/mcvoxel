@@ -5,11 +5,7 @@
 #include <boost/foreach.hpp>
 #include "octree.hpp"
 
-namespace io
-{
-
-}
-
+#if 0
 template< typename T >
 std::ostream& operator << (std::ostream& os, const octree::tree<T>& tree)
 {
@@ -51,3 +47,4 @@ std::ostream& operator << (std::ostream& os, const octree::tree<T>& tree)
 
 	return os;
 }
+#endif

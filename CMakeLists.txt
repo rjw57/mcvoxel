@@ -33,6 +33,7 @@ add_library(c10t-image third-party/c10t/src/image/color.cpp)
 add_executable(voxel
 	io.cpp
 	main.cpp
+	octree.cpp
 )
 
 # Fast Ray/Axis-Aligned Bounding Box Overlap Tests using Ray Slopes
