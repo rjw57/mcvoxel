@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <deque>
+#include <utility>
 
 #include <boost/foreach.hpp>
 
@@ -11,6 +12,8 @@
 #include <rayslope/ray.h>
 #include <rayslope/slope.h>
 #include <rayslope/slopeint_mul.h>
+
+#include "io.hpp"
 
 namespace octree
 {
@@ -266,110 +269,118 @@ struct intersection_result
 	bool operator < (const intersection_result& rhs) const { return distance < rhs.distance; }
 };
 
-template<typename T>
-struct ray_intersect_visitor : public boost::static_visitor<bool>
+struct extent
 {
-	ray_intersect_visitor(const ray& r, intersection_result& result, const location& loc, const long& size)
-		: r(r), result(result), loc(loc), size(size)
-	{
-		result.loc = loc;
-		result.size = size;
-	}
+	location loc;
+	long size;
 
-	struct child_intersection
-	{
-		aabox    box;
-		float    distance;
-		location loc;
-		long     size;
-		const typename octree<T>::branch_or_leaf_node_t* child_p;
+	extent()
+		: loc(0,0,0), size(0)
+	{ }
 
-		child_intersection()
-			: loc(0,0,0)
-		{ }
+	extent(const location& loc, const long& size)
+		: loc(loc), size(size)
+	{ }
+};
 
-		bool operator < (const child_intersection& rhs) const { return distance < rhs.distance; }
-	};
+template<typename T>
+struct child_intersection
+{
+	aabox    box;
+	float    distance;
+	location loc;
+	long     size;
+	const typename octree<T>::branch_or_leaf_node_t* child_p;
 
-	bool operator() (const typename octree<T>::leaf_node_t& leaf) const
-	{
-		aabox node_box;
-		::make_aabox(loc.x, loc.y, loc.z, loc.x+size, loc.y+size, loc.z+size, &node_box);
+	child_intersection()
+		: loc(0,0,0)
+	{ }
 
-		// do we intersect this node
-		ray* r_p = const_cast<ray*>(&r);
-		if(!slopeint_mul(r_p, &node_box, &result.distance))
-			return false;
-
-		return leaf != mc::Air;
-	}
-
-	bool operator() (const typename octree<T>::branch_node_t& branch) const
-	{
-		aabox node_box;
-		::make_aabox(loc.x, loc.y, loc.z, loc.x+size, loc.y+size, loc.z+size, &node_box);
-
-		// do we intersect this node?
-		ray* r_p = const_cast<ray*>(&r);
-		if(!slope(r_p, &node_box))
-			return false;
-
-		// we do somewhere, create a deque of children whose bounding boxes we intersect
-		std::deque<child_intersection> intersections;
-
-		for(size_t i=0; i<8; ++i)
-		{
-			child_intersection c_int;
-
-			c_int.child_p = &branch.children[i];
-			c_int.loc = location_of_child(i, loc, size);
-			c_int.size = size >> 1;
-			::make_aabox(c_int.loc.x, c_int.loc.y, c_int.loc.z,
-					c_int.loc.x+c_int.size, c_int.loc.y+c_int.size, c_int.loc.z+c_int.size, &c_int.box);
-
-			if(slopeint_mul(r_p, &c_int.box, &c_int.distance))
-				intersections.push_back(c_int);
-		}
-
-		// sort children by intersection distance
-		std::sort(intersections.begin(), intersections.end());
-
-		// try to intersect recursively
-		BOOST_FOREACH(const child_intersection& c_int, intersections)
-		{
-			if(boost::apply_visitor(ray_intersect_visitor<T>(
-							r, result, c_int.loc, c_int.size), *c_int.child_p))
-				return true;
-		}
-
-		return false;
-	}
-
-	const ray           &r;
-	intersection_result &result;
-	const location      &loc;
-	const long          &size;
+	bool operator < (const child_intersection& rhs) const { return distance < rhs.distance; }
 };
 
 template<typename T>
 bool octree<T>::ray_intersect(const ray& r, float& out_distance, location& out_loc, long& out_size) const
 {
+	typedef std::pair<extent, const branch_or_leaf_node_t*> node_record;
+
 	// convert the ray to one in this tree's frame
 	ray transformed_ray;
 	make_ray(r.x-first_loc_.x, r.y-first_loc_.y, r.z-first_loc_.z, r.i, r.j, r.k, &transformed_ray);
 
 	intersection_result result;
-	bool intersected = boost::apply_visitor(
-			ray_intersect_visitor<T>(transformed_ray, result, first_loc_, size()), root_node_);
 
-	if(intersected)
+	std::deque<node_record> nodes;
+	nodes.push_back(node_record(extent(first_loc_, size()), &root_node_));
+
+	while(nodes.size() > 0)
 	{
-		out_distance = result.distance;
-		out_loc = result.loc;
-		out_size = result.size;
+		const node_record& record = nodes.back();
+		nodes.pop_back();
+
+		const extent& node_ext = record.first;
+		const branch_or_leaf_node_t* node_p = record.second;
+
+		aabox node_box;
+		::make_aabox(node_ext.loc.x, node_ext.loc.y, node_ext.loc.z,
+				node_ext.loc.x+node_ext.size, node_ext.loc.y+node_ext.size, node_ext.loc.z+node_ext.size,
+				&node_box);
+
+		if(const leaf_node_t* leaf = boost::get<leaf_node_t>(node_p))
+		{
+			// do we intersect this node?
+			if(!slopeint_mul(&transformed_ray, &node_box, &out_distance))
+				continue;
+
+			// is it transparent?
+			if(*leaf == mc::Air)
+				continue;
+
+			out_loc = node_ext.loc;
+			out_size = node_ext.size;
+			return true;
+		}
+		else if(const branch_node_t* branch = boost::get<branch_node_t>(node_p))
+		{
+			// do we intersect this node?
+			if(!slope(&transformed_ray, &node_box))
+				continue;
+
+			// we do intersect somewhere, create a deque of children whose bounding boxes we intersect
+			std::deque< child_intersection<T> > intersections;
+
+			for(size_t i=0; i<8; ++i)
+			{
+				child_intersection<T> c_int;
+
+				c_int.child_p = &branch->children[i];
+				c_int.loc = location_of_child(i, node_ext.loc, node_ext.size);
+				c_int.size = node_ext.size >> 1;
+				::make_aabox(c_int.loc.x, c_int.loc.y, c_int.loc.z,
+						c_int.loc.x+c_int.size, c_int.loc.y+c_int.size, c_int.loc.z+c_int.size,
+						&c_int.box);
+
+				if(slopeint_mul(&transformed_ray, &c_int.box, &c_int.distance))
+					intersections.push_back(c_int);
+			}
+
+			// sort children by intersection distance
+			std::sort(intersections.begin(), intersections.end());
+
+			// try to intersect recursively, push nearest on the back
+			BOOST_FOREACH(const child_intersection<T>& c_int,
+					std::make_pair(intersections.rbegin(), intersections.rend()))
+			{
+				nodes.push_back(node_record(extent(c_int.loc, c_int.size), c_int.child_p));
+			}
+		}
+		else
+		{
+			assert(false);
+		}
 	}
 
-	return intersected;
+	return false;
 }
 
 }

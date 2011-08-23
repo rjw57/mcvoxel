@@ -1,4 +1,5 @@
 #include "io.hpp"
+#include "octree.hpp"
 
 namespace io
 {

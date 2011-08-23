@@ -4,7 +4,7 @@
 #include <iostream>
 
 #include "datamodel.hpp"
-#include "octree.hpp"
+
 
 namespace io
 {
@@ -12,6 +12,8 @@ namespace io
 void write_ppm(std::ostream& os, data::pixel* src, uint32_t w, uint32_t h);
 
 }
+
+namespace octree { struct location; }
 
 //template< typename T >
 //std::ostream& operator << (std::ostream& os, const octree::tree<T>& tree);

@@ -188,7 +188,7 @@ int main(int argc, char** argv)
 
 		float mag = sqrt(i*i + j*j + k*k);
 
-		make_ray(200, 90, -10, i/mag, j/mag, k/mag, &r);
+		make_ray(50, 90, -10, i/mag, j/mag, k/mag, &r);
 		const uint8_t* block_id_p = cast_ray(r, octrees, t);
 		if(block_id_p != NULL)
 		{
