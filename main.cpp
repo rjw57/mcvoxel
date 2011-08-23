@@ -4,6 +4,7 @@
 #include <functional>
 #include <iostream>
 #include <stdexcept>
+#include <sstream>
 
 #include <boost/foreach.hpp>
 
@@ -18,6 +19,8 @@
 #include <rayslope/slope.h>
 #include <rayslope/slopeint_mul.h>
 
+#include "datamodel.hpp"
+#include "io.hpp"
 #include "octree.hpp"
 
 typedef octree::tree<uint8_t> block_tree;
@@ -39,7 +42,7 @@ struct load_level : public std::unary_function<const mc::utils::level_coord&, vo
 
 		int32_t x(0), y(0), z(0);
 
-		int32_t start_x((level_info->get_x() * 16) + 1024), start_z((level_info->get_z() * 16) + 1024);
+		int32_t start_x(level_info->get_x() * 16), start_z(level_info->get_z() * 16);
 
 		for(int32_t idx(0); idx < blocks->length; ++idx)
 		{
@@ -47,11 +50,10 @@ struct load_level : public std::unary_function<const mc::utils::level_coord&, vo
 			Byte block_id = blocks->values[idx];
 			if(block_id != mc::Air)
 			{
-				if((x < 0) || (y < 0) || (z < 0))
-					break;
-				if((x >= tree.size()) || (y >= tree.size()) || (z >= tree.size()))
-					break;
-				tree.set(start_x + x, y, start_z + z, block_id);
+				octree::location loc(x + start_x, y, z + start_z);
+				if(!tree.root().contains(loc))
+					continue;
+				tree.set(loc, block_id);
 			}
 
 			// go to next co-ord
@@ -71,16 +73,63 @@ struct load_level : public std::unary_function<const mc::utils::level_coord&, vo
 	block_tree&                     tree;
 };
 
-struct out_pixel
+struct intersection_record
 {
-	uint8_t r,g,b;
+	octree::node<uint8_t>* node;
+	float                  t;
+	bool operator < (const intersection_record& rhs) const { return t < rhs.t; }
 };
 
-void write_ppm(std::ostream& os, out_pixel* src, uint32_t w, uint32_t h)
+octree::node<uint8_t>* cast_ray(ray* r, const std::vector<block_tree>& trees, float *t)
 {
-    // write the header and record that we're writing in big endian order
-    os << "P6" << std::endl << w << " " << h << std::endl << 255 << std::endl;
-    os.write(reinterpret_cast<char*>(src), 3*w*h);
+	float min_t = 0.f;
+	octree::node<uint8_t>* closest_node = NULL;
+
+	BOOST_FOREACH(const block_tree& tree, trees)
+	{
+		float temp_t;
+		octree::node<uint8_t>* node = tree.ray_intersect(r, &temp_t);
+		if(node == NULL)
+			continue;
+
+		if((closest_node == NULL) || (temp_t < min_t))
+		{
+			closest_node = node;
+			min_t = temp_t;
+		}
+	}
+
+	*t = min_t;
+	return closest_node;
+}
+
+inline bool is_surrounded(const block_tree& tree, const octree::location& loc)
+{
+	if(tree.get(loc.x-1, loc.y, loc.z) == mc::Air) return false;
+	if(tree.get(loc.x+1, loc.y, loc.z) == mc::Air) return false;
+	if(tree.get(loc.x, loc.y-1, loc.z) == mc::Air) return false;
+	if(tree.get(loc.x, loc.y+1, loc.z) == mc::Air) return false;
+	if(tree.get(loc.x, loc.y, loc.z-1) == mc::Air) return false;
+	if(tree.get(loc.x, loc.y, loc.z+1) == mc::Air) return false;
+	return true;
+}
+
+void sparsify(block_tree& tree)
+{
+	octree::location first_loc = tree.root().min_loc;
+	octree::location last_loc(first_loc);
+
+	last_loc.x += tree.root().size();
+	last_loc.y += tree.root().size();
+	last_loc.z += tree.root().size();
+
+	for(int x=first_loc.x+1; x<last_loc.x-1; ++x)
+		for(int y=1; y<128-1; ++y)
+			for(int z=first_loc.z+1; z<last_loc.z-1; ++z)
+			{
+				if(is_surrounded(tree, octree::location(x, y, z)))
+					tree.set(x,y,z,0xff);
+			}
 }
 
 int main(int argc, char** argv)
@@ -91,8 +140,7 @@ int main(int argc, char** argv)
 		return 1;
 	}
 
-	block_tree tree(12, mc::Air);
-
+	std::vector<block_tree> trees;
 	mc::world world(argv[1]);
 
 	mc::region_iterator region_iterator(world.get_iterator());
@@ -107,21 +155,32 @@ int main(int argc, char** argv)
 		region->read_coords(level_coords);
 		std::cout << " - " << level_coords.size() << " level coords." << std::endl;
 
-		std::for_each(level_coords.begin(), level_coords.end(), load_level(region, tree));
-		std::cout << " - raw node count " << tree.nodes() << " nodes." << std::endl;
-		tree.compact();
-		std::cout << " - compacted node count " << tree.nodes() << " nodes." << std::endl;
+		mc::utils::level_coord rc = mc::utils::path_to_region_coord(region->get_path());
+		octree::location start_coord = octree::location(rc.get_x() * 16, 0, rc.get_z() * 16);
+		trees.push_back(block_tree(9, start_coord, mc::Air));
+
+		std::for_each(level_coords.begin(), level_coords.end(), load_level(region, trees.back()));
+		std::cout << " - raw node count " << trees.back().nodes() << " nodes." << std::endl;
+		std::cout << "   ... sparsifying" << std::endl;
+		sparsify(trees.back());
+		std::cout << "   ... compacting" << std::endl;
+		trees.back().compact();
+		std::cout << " - compacted and sparsified node count " << trees.back().nodes() << " nodes." << std::endl;
 	}
 
-	std::cout << "Octree has a total of " << tree.nodes() << " nodes." << std::endl;
+	std::ofstream output("foo.dat");
+	BOOST_FOREACH(const block_tree& tree, trees)
+	{
+		output << tree;
+	}
 
 	const int w=640, h=480;
-	boost::shared_ptr<out_pixel> pixels(new out_pixel[w*h]);
+	boost::shared_ptr<data::pixel> pixels(new data::pixel[w*h]);
 
 	int32_t x(0), y(h);
 	for(uint32_t idx=0; idx<w*h; ++idx)
 	{
-		out_pixel* out = pixels.get() + idx;
+		data::pixel* out = pixels.get() + idx;
 		float fx(x), fy(y), t(0.f);
 		//block_pos pos;
 		ray r;
@@ -137,8 +196,8 @@ int main(int argc, char** argv)
 
 		float mag = sqrt(i*i + j*j + k*k);
 
-		make_ray(920, 80, 900, i/mag, j/mag, k/mag, &r);
-		octree::node<uint8_t>* int_node = tree.ray_intersect(&r, &t);
+		make_ray(50, 90, -10, i/mag, j/mag, k/mag, &r);
+		octree::node<uint8_t>* int_node = cast_ray(&r, trees, &t);
 		if(int_node != NULL)
 		{
 			uint8_t block_id = int_node->value;
@@ -186,7 +245,7 @@ int main(int argc, char** argv)
 	}
 
 	std::ofstream output_fstream("output.ppm");
-	write_ppm(output_fstream, pixels.get(), w, h);
+	io::write_ppm(output_fstream, pixels.get(), w, h);
 
 	return 0;
 }

@@ -3,14 +3,21 @@
 
 #include <algorithm>
 #include <cassert>
+#include <deque>
+#include <iostream>
+#include <memory>
 #include <stdexcept>
 #include <utility>
 #include <vector>
+
+#include <boost/foreach.hpp>
 
 #include <rayslope/aabox.h>
 #include <rayslope/ray.h>
 #include <rayslope/slope.h>
 #include <rayslope/slopeint_mul.h>
+
+#include <mc/blocks.hpp>
 
 namespace octree
 {
@@ -34,12 +41,12 @@ struct location
 	}
 };
 
-location operator + (const location& lhs, const location& rhs)
+inline location operator + (const location& lhs, const location& rhs)
 {
 	return location(lhs.x+rhs.x, lhs.y+rhs.y, lhs.z+rhs.z);
 }
 
-location operator - (const location& lhs, const location& rhs)
+inline location operator - (const location& lhs, const location& rhs)
 {
 	return location(lhs.x-rhs.x, lhs.y-rhs.y, lhs.z-rhs.z);
 }
@@ -57,6 +64,7 @@ struct node
 	{ }
 
 	node(const node<T>& n)
+		: min_loc(0,0,0), log_2_size(0)
 	{
 		assign_from(n);
 	}
@@ -305,7 +313,7 @@ struct node
 			if(intersection.node_ptr == NULL)
 			{
 				if(value == mc::Air)
-					return NULL;
+					continue;
 				*t = intersection.t;
 				return this;
 			}
@@ -418,12 +426,12 @@ class tree
 	{ }
 
 	tree(const tree& t)
-		: root_(new node<T>(t.root_))
+		: root_(new node<T>(*t.root_))
 	{ }
 
 	const tree& operator = (const tree& t)
 	{
-		root_ = std::auto_ptr< node<T> >(new node<T>(t.root_));
+		root_ = std::auto_ptr< node<T> >(new node<T>(*t.root_));
 		return *this;
 	}
 
@@ -438,7 +446,12 @@ class tree
 
 	long size() const { return root_->size(); }
 
-	node<T>* ray_intersect(ray* r, float* t) { return root_->ray_intersect(r, t); }
+	node<T>* ray_intersect(ray* r, float* t) const {
+		ray trans_ray(*r);
+		location min_loc(root_->min_loc);
+		make_ray(r->x-min_loc.x, r->y-min_loc.y, r->z-min_loc.z, r->i, r->j, r->k, &trans_ray);
+		return root_->ray_intersect(&trans_ray, t);
+	}
 
 	void compact() { root_->compact(); }
 
