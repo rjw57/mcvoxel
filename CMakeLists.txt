@@ -14,14 +14,6 @@ include_directories(${ZLIB_INCLUDE_DIR})
 # Generic third-party library includes
 include_directories(third-party)
 
-# Add an Octree implementation.
-include_directories(third-party/octree)
-
-# Build a demo of using the octree code.
-add_executable(octree-demo
-	third-party/octree/demo.cpp
-)
-
 # Code from c10t to load level files
 include_directories(third-party/c10t/src)
 add_subdirectory(third-party/c10t/src/mc)
