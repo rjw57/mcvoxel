@@ -3,10 +3,11 @@
 #endif
 
 #include <algorithm>
-#include <deque>
+#include <stack>
 #include <utility>
 
 #include <boost/foreach.hpp>
+#include <boost/tuple/tuple.hpp>
 
 #include <rayslope/aabox.h>
 #include <rayslope/ray.h>
@@ -180,8 +181,8 @@ void octree<T>::set(const location& loc, const T& val)
 template<typename T>
 long octree<T>::node_count() const
 {
-	std::deque<const branch_or_leaf_node_t*> nodes_to_examine;
-	nodes_to_examine.push_back(&root_node_);
+	std::stack<const branch_or_leaf_node_t*> nodes_to_examine;
+	nodes_to_examine.push(&root_node_);
 
 	// visit nodes in a depth-first way
 	long count = 0;
@@ -189,14 +190,14 @@ long octree<T>::node_count() const
 	{
 		++count;
 
-		const branch_or_leaf_node_t* next_node = nodes_to_examine.back();
-		nodes_to_examine.pop_back();
+		const branch_or_leaf_node_t* next_node = nodes_to_examine.top();
+		nodes_to_examine.pop();
 
 		if(const branch_node_t* branch_p = boost::get<branch_node_t>(next_node))
 		{
 			for(int i=0; i<8; ++i)
 			{
-				nodes_to_examine.push_back(&branch_p->children[i]);
+				nodes_to_examine.push(&branch_p->children[i]);
 			}
 		}
 	}
@@ -302,52 +303,54 @@ struct child_intersection
 template<typename T>
 bool octree<T>::ray_intersect(const ray& r, float& out_distance, location& out_loc, long& out_size) const
 {
-	typedef std::pair<extent, const branch_or_leaf_node_t*> node_record;
+	typedef boost::tuple<extent, const branch_or_leaf_node_t*, float> node_record;
 
 	// convert the ray to one in this tree's frame
 	ray transformed_ray;
 	make_ray(r.x-first_loc_.x, r.y-first_loc_.y, r.z-first_loc_.z, r.i, r.j, r.k, &transformed_ray);
 
+	// do we intersect this tree at all?
+	aabox root_box;
+	::make_aabox(first_loc_.x, first_loc_.y, first_loc_.z,
+			first_loc_.x+size(), first_loc_.y+size(), first_loc_.z+size(),
+			&root_box);
+
+	float distance;
+	if(!slopeint_mul(&transformed_ray, &root_box, &distance))
+		return false;
+
 	intersection_result result;
 
-	std::deque<node_record> nodes;
-	nodes.push_back(node_record(extent(first_loc_, size()), &root_node_));
+	// optimisation: only nodes which definitely intersect the ray are pushed on this stack
+	std::stack<node_record> nodes;
+	nodes.push(node_record(extent(first_loc_, size()), &root_node_, distance));
+
+	std::vector< child_intersection<T> > intersections;
+	intersections.reserve(8);
 
 	while(nodes.size() > 0)
 	{
-		const node_record& record = nodes.back();
-		nodes.pop_back();
+		const node_record& record = nodes.top();
+		nodes.pop();
 
-		const extent& node_ext = record.first;
-		const branch_or_leaf_node_t* node_p = record.second;
-
-		aabox node_box;
-		::make_aabox(node_ext.loc.x, node_ext.loc.y, node_ext.loc.z,
-				node_ext.loc.x+node_ext.size, node_ext.loc.y+node_ext.size, node_ext.loc.z+node_ext.size,
-				&node_box);
+		const extent& node_ext = boost::get<0>(record);
+		const branch_or_leaf_node_t* node_p = boost::get<1>(record);
 
 		if(const leaf_node_t* leaf = boost::get<leaf_node_t>(node_p))
 		{
-			// do we intersect this node?
-			if(!slopeint_mul(&transformed_ray, &node_box, &out_distance))
-				continue;
-
 			// is it transparent?
 			if(*leaf == mc::Air)
 				continue;
 
+			out_distance = boost::get<2>(record);
 			out_loc = node_ext.loc;
 			out_size = node_ext.size;
 			return true;
 		}
 		else if(const branch_node_t* branch = boost::get<branch_node_t>(node_p))
 		{
-			// do we intersect this node?
-			if(!slope(&transformed_ray, &node_box))
-				continue;
-
-			// we do intersect somewhere, create a deque of children whose bounding boxes we intersect
-			std::deque< child_intersection<T> > intersections;
+			// we do intersect somewhere, create a vector of children whose bounding boxes we intersect
+			intersections.clear();
 
 			for(size_t i=0; i<8; ++i)
 			{
@@ -371,7 +374,7 @@ bool octree<T>::ray_intersect(const ray& r, float& out_distance, location& out_l
 			BOOST_FOREACH(const child_intersection<T>& c_int,
 					std::make_pair(intersections.rbegin(), intersections.rend()))
 			{
-				nodes.push_back(node_record(extent(c_int.loc, c_int.size), c_int.child_p));
+				nodes.push(node_record(extent(c_int.loc, c_int.size), c_int.child_p, c_int.distance));
 			}
 		}
 		else
