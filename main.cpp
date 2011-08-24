@@ -315,8 +315,12 @@ struct main_program
 				max_sigma = std::max(max_sigma, local_sigma);
 			}
 
-			for(int32_t idx=0, x=0, y=h; idx<w*h; ++idx)
+#			pragma omp parallel for schedule(dynamic, 1024)
+			for(int32_t idx=0; idx<w*h; ++idx)
 			{
+				int x = idx % w;
+				int y = h - 1 - idx / w;
+
 				data::pixel<float>* out = float_pixels.get() + idx;
 				data::pixel<float>* out_sq = float_pixels_sq.get() + idx;
 				data::pixel<float>* out_log = float_pixels_log.get() + idx;
@@ -343,12 +347,7 @@ struct main_program
 						local_sigma /= max_sigma;
 				}
 
-				if((idx & 0xff) == 0)
-				{
-					std::cout << (100*idx)/(w*h) << "%\r" << std::flush;
-				}
-
-				if((sample_idx < 4) || ((sample_idx & 0xf) == (idx & 0xf)) || (uniform_real() <= local_sigma))
+				if((sample_idx < 8) || (uniform_real() <= 0.05f + 10.f * local_sigma))
 				{
 					float fx(x), fy(y);
 					data::pixel<float> pixel_value =
@@ -368,14 +367,7 @@ struct main_program
 					*p_luminance_sq += rgb2y(pixel_value) * rgb2y(pixel_value);
 					*p_n_samples += 1;
 				}
-
-				++x;
-				if(x >= w)
-				{
-					x = 0; --y;
-				}
 			}
-			std::cout << std::endl;
 
 			for(int32_t idx=0, x=0, y=0; idx<w*h; ++idx)
 			{
@@ -408,6 +400,8 @@ struct main_program
 							fout = (k-1) * theta;
 					}
 					*/
+
+					fout = mean;
 				}
 
 				out->r = std::max(0, std::min(0xff, static_cast<int>(fout.r)));

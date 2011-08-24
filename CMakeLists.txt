@@ -2,6 +2,13 @@ project(voxel CXX C)
 cmake_minimum_required(VERSION 2.8)
 
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall")
+set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wall")
+
+find_package(OpenMP)
+if(OPENMP_FOUND)
+	set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${OpenMP_CXX_FLAGS}")
+	set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${OpenMP_C_FLAGS}")
+endif(OPENMP_FOUND)
 
 # We need to boost libraries.
 find_package(Boost REQUIRED COMPONENTS filesystem system)
