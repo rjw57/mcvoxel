@@ -20,6 +20,51 @@ struct pixel
 		return rv;
 	}
 
+	pixel<T> operator - (const pixel<T>& p)
+	{
+		pixel<T> rv;
+		rv.r = r - p.r;
+		rv.g = g - p.g;
+		rv.b = b - p.b;
+		return rv;
+	}
+
+	pixel<T> operator / (const pixel<T>& p)
+	{
+		pixel<T> rv;
+		rv.r = r / p.r;
+		rv.g = g / p.g;
+		rv.b = b / p.b;
+		return rv;
+	}
+
+	pixel<T> operator * (const pixel<T>& p)
+	{
+		pixel<T> rv;
+		rv.r = r * p.r;
+		rv.g = g * p.g;
+		rv.b = b * p.b;
+		return rv;
+	}
+
+	pixel<T> operator + (const T& v)
+	{
+		pixel<T> rv;
+		rv.r = r + v;
+		rv.g = g + v;
+		rv.b = b + v;
+		return rv;
+	}
+
+	pixel<T> operator - (const T& v)
+	{
+		pixel<T> rv;
+		rv.r = r - v;
+		rv.g = g - v;
+		rv.b = b - v;
+		return rv;
+	}
+
 	pixel<T> operator / (const T& v)
 	{
 		pixel<T> rv;

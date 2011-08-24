@@ -47,6 +47,12 @@ static void sample_spherical_ray(float x, float y, float z, ray* r)
 	make_ray(x, y, z, ct*sp, st*sp, cp, r);
 }
 
+template<typename T>
+T rgb2y(const data::pixel<T>& p)
+{
+	return 0.299f*p.r + 0.114f*p.g + 0.587f*p.b;
+}
+
 struct load_level : public std::unary_function<const mc::utils::level_coord&, void>
 {
 	load_level(boost::shared_ptr<mc::region> region, octree::octree<uint8_t>& octree)
@@ -155,6 +161,26 @@ void sparsify(octree::octree<T>& tree)
 			}
 }
 
+static float gamma_est(float sample_mean, float sample_log_mean)
+{
+	if(sample_mean <= 0.f)
+		return sample_mean;
+
+	float s = log(sample_mean) - sample_log_mean;
+
+	float alpha = (s-3.f)*(s-3.f)+24.f*s;
+	if(alpha < 0.f)
+		return sample_mean;
+
+	float k = (3.f - s + sqrt(alpha)) / (12.f*s);
+	if(k < 1.f)
+		return sample_mean;
+
+	float theta = sample_mean / k;
+
+	return (k-1.f) * theta;
+}
+
 struct main_program
 {
 	std::vector< octree::octree<uint8_t> > octrees;
@@ -230,6 +256,11 @@ struct main_program
 		const int w=850, h=480;
 		boost::shared_ptr< data::pixel<uint8_t> > pixels(new data::pixel<uint8_t>[w*h]);
 		boost::shared_ptr< data::pixel<float> > float_pixels(new data::pixel<float>[w*h]);
+		boost::shared_ptr< data::pixel<float> > float_pixels_sq(new data::pixel<float>[w*h]);
+		boost::shared_ptr< data::pixel<float> > float_pixels_log(new data::pixel<float>[w*h]);
+		boost::shared_ptr< float > luminance_pixels(new float[w*h]);
+		boost::shared_ptr< float > luminance_sq_pixels(new float[w*h]);
+		boost::shared_ptr< int > n_samples_pixels(new int[w*h]);
 
 		light_x = 1.f;
 		light_y = 4.f;
@@ -244,24 +275,99 @@ struct main_program
 		{
 			data::pixel<float>* out = float_pixels.get() + idx;
 			out->r = out->g = out->b = 0.f;
+
+			data::pixel<float>* out_sq = float_pixels_sq.get() + idx;
+			out_sq->r = out_sq->g = out_sq->b = 0.f;
+
+			data::pixel<float>* out_log = float_pixels_log.get() + idx;
+			out_log->r = out_log->g = out_log->b = 0.f;
+
+			(luminance_pixels.get())[idx] = (luminance_sq_pixels.get())[idx] = 0.f;
+			(n_samples_pixels.get())[idx] = 0;
 		}
 
-		const int32_t n_samples = 256;
+		const int32_t n_samples = 2048;
 		for(int32_t sample_idx=0; sample_idx<n_samples; ++sample_idx)
 		{
 			std::cout << "pass " << sample_idx+1 << "/" << n_samples << std::endl;
 
+			float max_sigma = 0.f;
+			for(int32_t idx=0; idx<w*h; ++idx)
+			{
+				int *p_n_samples = n_samples_pixels.get() + idx;
+				if(*p_n_samples == 0)
+					continue;
+
+				float *p_luminance = luminance_pixels.get() + idx;
+				float *p_luminance_sq = luminance_sq_pixels.get() + idx;
+
+				float mu = *p_luminance / *p_n_samples;
+				float local_variance = (*p_luminance_sq / *p_n_samples) - mu*mu;
+				float local_sigma = 0.f;
+
+				if(local_variance > 0.f)
+					local_sigma = sqrt(local_variance);
+
+				// divide by local mean luminance
+				if(mu > 0.f)
+					local_sigma /= mu;
+
+				max_sigma = std::max(max_sigma, local_sigma);
+			}
+
 			for(int32_t idx=0, x=0, y=h; idx<w*h; ++idx)
 			{
 				data::pixel<float>* out = float_pixels.get() + idx;
+				data::pixel<float>* out_sq = float_pixels_sq.get() + idx;
+				data::pixel<float>* out_log = float_pixels_log.get() + idx;
+
+				int *p_n_samples = n_samples_pixels.get() + idx;
+				float *p_luminance = luminance_pixels.get() + idx;
+				float *p_luminance_sq = luminance_sq_pixels.get() + idx;
+
+				float local_sigma = 100.f;
+				if(*p_n_samples > 0)
+				{
+					float mu = *p_luminance / *p_n_samples;
+					float local_variance = (*p_luminance_sq / *p_n_samples) - mu*mu;
+					local_sigma = sqrt(local_variance);
+
+					if(local_variance > 0.f)
+						local_sigma = sqrt(local_variance);
+
+					// divide by local mean luminance
+					if(mu > 0.f)
+						local_sigma /= mu;
+
+					if(max_sigma > 0.f)
+						local_sigma /= max_sigma;
+				}
 
 				if((idx & 0xff) == 0)
 				{
 					std::cout << (100*idx)/(w*h) << "%\r" << std::flush;
 				}
 
-				float fx(x), fy(y);
-				*out = *out + sample(fx+uniform_real()-0.5f, fy+uniform_real()-0.5f, w, h);
+				if((sample_idx < 4) || ((sample_idx & 0xf) == (idx & 0xf)) || (uniform_real() <= local_sigma))
+				{
+					float fx(x), fy(y);
+					data::pixel<float> pixel_value =
+						sample(fx+uniform_real()-0.5f, fy+uniform_real()-0.5f, w, h);
+
+					*out = *out + pixel_value;
+					*out_sq = *out_sq + pixel_value * pixel_value;
+
+					if(out->r > 0.f)
+						out_log->r += log(out->r);
+					if(out->g > 0.f)
+						out_log->g += log(out->g);
+					if(out->b > 0.f)
+						out_log->b += log(out->b);
+
+					*p_luminance += rgb2y(pixel_value);
+					*p_luminance_sq += rgb2y(pixel_value) * rgb2y(pixel_value);
+					*p_n_samples += 1;
+				}
 
 				++x;
 				if(x >= w)
@@ -274,13 +380,50 @@ struct main_program
 			for(int32_t idx=0, x=0, y=0; idx<w*h; ++idx)
 			{
 				data::pixel<float> fout = *(float_pixels.get() + idx);
-				data::pixel<uint8_t>* out = pixels.get() + idx;
+				data::pixel<float> fout_sq = *(float_pixels_sq.get() + idx);
+				data::pixel<float> fout_log = *(float_pixels_log.get() + idx);
 
-				fout = fout / (sample_idx+1);
+				data::pixel<uint8_t>* out = pixels.get() + idx;
+				int *p_n_samples = n_samples_pixels.get() + idx;
+
+				if(*p_n_samples > 0)
+				{
+					// a better estimator based on assuming the distribution is gamma
+					data::pixel<float> mean = fout / (*p_n_samples);
+					data::pixel<float> mean_log = fout_log / (*p_n_samples);
+
+					fout.r = gamma_est(mean.r, mean_log.r);
+					fout.g = gamma_est(mean.g, mean_log.g);
+					fout.b = gamma_est(mean.b, mean_log.b);
+
+					/*
+					data::pixel<float> mean_sq = fout_sq / (*p_n_samples);
+					data::pixel<float> variance = mean_sq - mean*mean;
+					if(rgb2y(variance) > 0.f)
+					{
+						data::pixel<float> theta = variance / mean;
+						data::pixel<float> k = mean / theta;
+
+						if((rgb2y(k) >= 1.f))
+							fout = (k-1) * theta;
+					}
+					*/
+				}
 
 				out->r = std::max(0, std::min(0xff, static_cast<int>(fout.r)));
 				out->g = std::max(0, std::min(0xff, static_cast<int>(fout.g)));
 				out->b = std::max(0, std::min(0xff, static_cast<int>(fout.b)));
+
+				//out->r = out->g = out->b = (250*(*p_n_samples))/(sample_idx+1);
+#if 0
+				float *p_luminance = luminance_pixels.get() + idx;
+				float *p_luminance_sq = luminance_sq_pixels.get() + idx;
+
+				float mu = *p_luminance / *p_n_samples
+				float local_variance = (*p_luminance_sq / *p_n_samples) - mu*mu;
+				float local_sigma = sqrt(local_variance);
+				out->r = out->g = out->b = (250*local_sigma/max_sigma);
+#endif
 
 				if((idx & 0xff) == 0)
 				{
