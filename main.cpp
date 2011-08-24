@@ -23,6 +23,8 @@
 #include <rayslope/slope.h>
 #include <rayslope/slopeint_mul.h>
 
+#include <hdrloader/hdrloader.h>
+
 #include "datamodel.hpp"
 #include "io.hpp"
 #include "octree.hpp"
@@ -184,16 +186,48 @@ static float gamma_est(float sample_mean, float sample_log_mean)
 struct main_program
 {
 	std::vector< octree::octree<uint8_t> > octrees;
+	HDRLoaderResult                        sky_light_probe;
 
 	float light_x, light_y, light_z;
 
+	data::pixel<float> sample_sky(const ray& r) const
+	{
+		float m = sqrt(r.i*r.i+r.j*r.j+r.k*r.k);
+		float theta = acos(r.j/m);
+		float phi = atan2(r.k, r.i);
+
+		float sky_x = std::max(0.f, std::min(1.f, 0.5f * (1.f + (phi / 3.14159f))));
+		float sky_y = std::max(0.f, std::min(1.f, theta / 3.14159f));
+
+		data::pixel<float> output;
+		//output.r = sky_x; output.g = sky_y; output.b = 0.f;
+
+		int pix_x = static_cast<int>(sky_x * sky_light_probe.width) % sky_light_probe.width;
+		int pix_y = static_cast<int>(sky_y * sky_light_probe.height) % sky_light_probe.height;
+
+		float *p_sky_pix = &(sky_light_probe.cols[3*(pix_x+(pix_y*sky_light_probe.width))]);
+		output.r = p_sky_pix[0];
+		output.g = p_sky_pix[1];
+		output.b = p_sky_pix[2];
+
+		return output;
+	}
+
 	int operator() (int argc, char** argv)
 	{
-		if(argc != 2)
+		if(argc != 4)
 		{
-			std::cerr << "usage: " << argv[0] << " <path to world>" << std::endl;
+			std::cerr << "usage: " << argv[0] << " <path to world> <sky HDR image> <output PPM>" << std::endl;
 			return 1;
 		}
+
+		if(!HDRLoader::load(argv[2], sky_light_probe))
+		{
+			std::cerr << "error loading sky light probe." << std::endl;
+			return 1;
+		}
+
+		std::cout << "Loaded skybox size: " << sky_light_probe.width << "x" << sky_light_probe.height << std::endl;
 
 #if 1
 		mc::world world(argv[1]);
@@ -226,6 +260,7 @@ struct main_program
 			std::cout << " - new node count " << octrees.back().node_count() << " nodes." << std::endl;
 		}
 
+#if 0
 		{
 			std::ofstream output("foo.dat");
 			output << octrees.size() << std::endl;
@@ -235,6 +270,7 @@ struct main_program
 			}
 			output.close();
 		}
+#endif
 #else
 		octrees.clear();
 		{
@@ -347,7 +383,7 @@ struct main_program
 						local_sigma /= max_sigma;
 				}
 
-				if((sample_idx < 8) || (uniform_real() <= 0.05f + 10.f * local_sigma))
+				if((sample_idx < 8) || (uniform_real() <= 0.25f + 0.75f * local_sigma))
 				{
 					float fx(x), fy(y);
 					data::pixel<float> pixel_value =
@@ -366,6 +402,20 @@ struct main_program
 					*p_luminance += rgb2y(pixel_value);
 					*p_luminance_sq += rgb2y(pixel_value) * rgb2y(pixel_value);
 					*p_n_samples += 1;
+				}
+			}
+
+			float max_lum = 0.f;
+			for(int32_t idx=0; idx<w*h; ++idx)
+			{
+				data::pixel<float> fout = *(float_pixels.get() + idx);
+				int *p_n_samples = n_samples_pixels.get() + idx;
+
+				if(*p_n_samples > 0)
+				{
+					// a better estimator based on assuming the distribution is gamma
+					data::pixel<float> mean = fout / (*p_n_samples);
+					max_lum = std::max(max_lum, rgb2y(mean));
 				}
 			}
 
@@ -404,6 +454,10 @@ struct main_program
 					fout = mean;
 				}
 
+				fout.r = 255.f * sqrt(fout.r / max_lum);
+				fout.g = 255.f * sqrt(fout.g / max_lum);
+				fout.b = 255.f * sqrt(fout.b / max_lum);
+
 				out->r = std::max(0, std::min(0xff, static_cast<int>(fout.r)));
 				out->g = std::max(0, std::min(0xff, static_cast<int>(fout.g)));
 				out->b = std::max(0, std::min(0xff, static_cast<int>(fout.b)));
@@ -431,7 +485,7 @@ struct main_program
 				}
 			}
 
-			std::ofstream output_fstream("output.ppm");
+			std::ofstream output_fstream(argv[3]);
 			io::write_ppm(output_fstream, pixels.get(), w, h);
 		}
 
@@ -447,11 +501,11 @@ struct main_program
 		fx -= w>>1; fy -= h>>1;
 
 		//float i(fx), k(fy), j(-0.5f*h);
-		float i(fx), j(fy), k(0.66f*h);
+		float i(fx), j(fy), k(h);
 
 
-		float pitch = 15.f * (2.f*3.14159f/360.f);
-		float yaw = -20.f * (2.f*3.14159f/360.f);
+		float pitch = 10.f * (2.f*3.14159f/360.f);
+		float yaw = -30.f * (2.f*3.14159f/360.f);
 
 		float cp = cos(pitch), sp = sin(pitch);
 		float new_j = cp*j - sp*k, new_k = sp*j + cp*k;
@@ -462,7 +516,7 @@ struct main_program
 		i = new_i; k = new_k2;
 
 		float mag = sqrt(i*i + j*j + k*k);
-		make_ray(107.2, 77.8f, 101.1, i/mag, j/mag, k/mag, &r);
+		make_ray(107.2, 77.8f, 87.1, i/mag, j/mag, k/mag, &r);
 		//make_ray(0, 1000, 0, i/mag, j/mag, k/mag, &r);
 
 		octree::sub_location node_sub_loc;
@@ -553,49 +607,45 @@ struct main_program
 					break;
 			}
 
+			output.r /= 0xff; output.g /= 0xff; output.b /= 0xff;
+
 #if 0
 			output.r = 127 + (127*normal_x);
 			output.g = 127 + (127*normal_y);
 			output.b = 127 + (127*normal_z);
-#else
-			float luminance = 0.2f + 0.8f * std::max(0.f, light_x*normal_x + light_y*normal_y + light_z*normal_z);
+#endif
 
-#if 1
+			data::pixel<float> surface_colour = output;
+
+			output.r = output.g = output.b = 0.f;
+
 			// quick and dirty AO implementation
-			luminance = 0.f;
-			const int n_samples = 1;
+			const int n_samples = 4;
 			for(int sample_no=0; sample_no < n_samples; ++sample_no)
 			{
 				ray sample_ray;
 				sample_spherical_ray(hit_x, hit_y, hit_z, &sample_ray);
 
-				float contribution = sample_ray.i*normal_x + sample_ray.j*normal_y + sample_ray.k*normal_z;
+				float contribution = 4.f * 3.14159f *
+					sample_ray.i*normal_x + sample_ray.j*normal_y + sample_ray.k*normal_z;
+
 				if(contribution < 0.f)
-				{
-					contribution = -contribution;
-					make_ray(sample_ray.x, sample_ray.y, sample_ray.z,
-							-sample_ray.i, -sample_ray.j, -sample_ray.k, &sample_ray);
-				}
+					continue;
 
 				octree::sub_location temp_sub_loc;
 				if(NULL == cast_ray(sample_ray, octrees, temp_sub_loc))
 				{
-					luminance += contribution;
+					data::pixel<float> sky = sample_sky(sample_ray);
+
+					output = output + (surface_colour * sky * contribution);
 				}
 			}
-			luminance /= n_samples;
-#endif
 
-			output.r *= luminance;
-			output.g *= luminance;
-			output.b *= luminance;
-#endif
+			output = output / n_samples;
 		}
 		else
 		{
-			output.r = 0x1e;
-			output.g = 0x90;
-			output.b = 0xff;
+			output = sample_sky(r);
 		}
 
 		return output;

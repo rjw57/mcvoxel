@@ -29,6 +29,9 @@ add_subdirectory(third-party/c10t/src/nbt)
 # HACK: Create an 'image' library with just enough of c10t in it to link.
 add_library(c10t-image third-party/c10t/src/image/color.cpp)
 
+# HDR image support
+add_library(hdrloader third-party/hdrloader/hdrloader.cpp)
+
 add_executable(voxel
 	io.cpp
 	main.cpp
@@ -48,5 +51,7 @@ add_library(rayslope
 target_link_libraries(voxel
 	c10t-mc c10t-image
 	rayslope
+	hdrloader
 	${Boost_FILESYSTEM_LIBRARY} ${Boost_SYSTEM_LIBRARY}
-	${ZLIB_LIBRARY})
+	${ZLIB_LIBRARY}
+)
