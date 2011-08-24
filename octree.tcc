@@ -347,15 +347,10 @@ bool octree<T>::ray_intersect(const ray& r, sub_location& out_sub_loc) const
 			if(distance <= 0.f)
 				continue;
 
-			sub_location sub_loc;
-
-			sub_loc.coords[0] = transformed_ray.x + transformed_ray.i * distance;
-			sub_loc.coords[1] = transformed_ray.y + transformed_ray.j * distance;
-			sub_loc.coords[2] = transformed_ray.z + transformed_ray.k * distance;
-
-			sub_loc.node_extent = node_ext;
-
-			out_sub_loc = sub_loc;
+			out_sub_loc.coords[0] = transformed_ray.x + transformed_ray.i * distance;
+			out_sub_loc.coords[1] = transformed_ray.y + transformed_ray.j * distance;
+			out_sub_loc.coords[2] = transformed_ray.z + transformed_ray.k * distance;
+			out_sub_loc.node_extent = node_ext;
 
 			return true;
 		}

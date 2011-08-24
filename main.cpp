@@ -322,7 +322,7 @@ struct main_program
 			(n_samples_pixels.get())[idx] = 0;
 		}
 
-		const int32_t n_samples = 2048;
+		const int32_t n_samples = 512;
 		for(int32_t sample_idx=0; sample_idx<n_samples; ++sample_idx)
 		{
 			std::cout << "pass " << sample_idx+1 << "/" << n_samples << std::endl;
@@ -418,6 +418,9 @@ struct main_program
 					max_lum = std::max(max_lum, rgb2y(mean));
 				}
 			}
+
+			// fudge factor!
+			max_lum *= 0.5f;
 
 			for(int32_t idx=0, x=0, y=0; idx<w*h; ++idx)
 			{
@@ -609,39 +612,45 @@ struct main_program
 
 			output.r /= 0xff; output.g /= 0xff; output.b /= 0xff;
 
-#if 0
-			output.r = 127 + (127*normal_x);
-			output.g = 127 + (127*normal_y);
-			output.b = 127 + (127*normal_z);
-#endif
-
 			data::pixel<float> surface_colour = output;
 
 			output.r = output.g = output.b = 0.f;
 
 			// quick and dirty AO implementation
 			const int n_samples = 4;
-			for(int sample_no=0; sample_no < n_samples; ++sample_no)
+			int sample_count = 0;
+			while(sample_count < n_samples)
 			{
 				ray sample_ray;
 				sample_spherical_ray(hit_x, hit_y, hit_z, &sample_ray);
 
-				float contribution = 4.f * 3.14159f *
-					sample_ray.i*normal_x + sample_ray.j*normal_y + sample_ray.k*normal_z;
+				float contribution = (1.f / (2.f * 3.14159f)) *
+					(sample_ray.i*normal_x + sample_ray.j*normal_y + sample_ray.k*normal_z);
 
 				if(contribution < 0.f)
-					continue;
+				{
+					contribution = -contribution;
+					make_ray(sample_ray.x, sample_ray.y, sample_ray.z,
+							-sample_ray.i, -sample_ray.j, -sample_ray.k, &sample_ray);
+				}
 
 				octree::sub_location temp_sub_loc;
 				if(NULL == cast_ray(sample_ray, octrees, temp_sub_loc))
 				{
 					data::pixel<float> sky = sample_sky(sample_ray);
-
 					output = output + (surface_colour * sky * contribution);
 				}
+
+				++sample_count;
 			}
 
 			output = output / n_samples;
+
+#if 0
+			output.r = 127 + (127*normal_x);
+			output.g = 127 + (127*normal_y);
+			output.b = 127 + (127*normal_z);
+#endif
 		}
 		else
 		{
