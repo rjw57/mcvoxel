@@ -307,6 +307,8 @@ bool octree<T>::ray_intersect(const ray& r, sub_location& out_sub_loc) const
 	ray transformed_ray;
 	make_ray(r.x-first_loc_.x, r.y-first_loc_.y, r.z-first_loc_.z, r.i, r.j, r.k, &transformed_ray);
 
+	location transformed_origin(transformed_ray.x, transformed_ray.y, transformed_ray.z);
+
 	// do we intersect this tree at all?
 	aabox root_box;
 	::make_aabox(first_loc_.x, first_loc_.y, first_loc_.z,
@@ -314,7 +316,8 @@ bool octree<T>::ray_intersect(const ray& r, sub_location& out_sub_loc) const
 			&root_box);
 
 	float distance;
-	if(!slopeint_mul(&transformed_ray, &root_box, &distance))
+	if(!node_contains(transformed_origin, first_loc_, size()) &&
+				(!slopeint_mul(&transformed_ray, &root_box, &distance) || (distance <= 0.f)))
 		return false;
 
 	intersection_result result;
@@ -340,8 +343,11 @@ bool octree<T>::ray_intersect(const ray& r, sub_location& out_sub_loc) const
 			if(*leaf == mc::Air)
 				continue;
 
-			sub_location sub_loc;
 			float distance = boost::get<2>(record);
+			if(distance <= 0.f)
+				continue;
+
+			sub_location sub_loc;
 
 			sub_loc.coords[0] = transformed_ray.x + transformed_ray.i * distance;
 			sub_loc.coords[1] = transformed_ray.y + transformed_ray.j * distance;
@@ -365,6 +371,19 @@ bool octree<T>::ray_intersect(const ray& r, sub_location& out_sub_loc) const
 				c_int.child_p = &branch->children[i];
 				c_int.loc = location_of_child(i, node_ext.loc, node_ext.size);
 				c_int.size = node_ext.size >> 1;
+
+				// optimisation: if this child is a leaf node and is transparent, skip it
+				if(const leaf_node_t* leaf_child = boost::get<leaf_node_t>(node_p))
+				{
+					// skip transparent leaf nodes
+					if(*leaf_child == mc::Air)
+						continue;
+
+					// skip leaf nodes containing the origin
+					if(node_contains(transformed_origin, c_int.loc, c_int.size))
+						continue;
+				}
+
 				::make_aabox(c_int.loc.x, c_int.loc.y, c_int.loc.z,
 						c_int.loc.x+c_int.size, c_int.loc.y+c_int.size, c_int.loc.z+c_int.size,
 						&c_int.box);
@@ -372,6 +391,10 @@ bool octree<T>::ray_intersect(const ray& r, sub_location& out_sub_loc) const
 				if(slopeint_mul(&transformed_ray, &c_int.box, &c_int.distance))
 					intersections.push_back(c_int);
 			}
+
+			// if no intersections, bail
+			if(intersections.empty())
+				continue;
 
 			// sort children by intersection distance
 			std::sort(intersections.begin(), intersections.end());
