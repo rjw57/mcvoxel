@@ -159,7 +159,7 @@ struct main_program
 	std::vector<octree::crystalised_octree>    crystal_octrees;
 	HDRLoaderResult                            sky_light_probe;
 
-	bool cast_ray(const ray& r, octree::sub_location& out_sub_loc, data::block& out_block)
+	bool cast_ray(const ray& r, octree::sub_location& out_sub_loc, data::block& out_block) const
 	{
 		float min_dist_sq = -1.f;
 
@@ -205,6 +205,168 @@ struct main_program
 		output.r = p_sky_pix[0];
 		output.g = p_sky_pix[1];
 		output.b = p_sky_pix[2];
+
+		return output;
+	}
+
+	data::pixel<float> sample_pixel(float fx, float fy, int w, int h) const
+	{
+		ray r;
+
+		fx -= w>>1; fy -= h>>1;
+
+		//float i(fx), k(fy), j(-0.5f*h);
+		float i(fx), j(fy), k(h);
+
+		float pitch = 10.f * (2.f*3.14159f/360.f);
+		float yaw = -30.f * (2.f*3.14159f/360.f);
+
+		float cp = cos(pitch), sp = sin(pitch);
+		float new_j = cp*j - sp*k, new_k = sp*j + cp*k;
+		j = new_j; k = new_k;
+
+		float cy = cos(yaw), sy = sin(yaw);
+		float new_i = cy*i - sy*k, new_k2 = sy*i + cy*k;
+		i = new_i; k = new_k2;
+
+		float mag = sqrt(i*i + j*j + k*k);
+		make_ray(107.2, 77.8f, 87.1, i/mag, j/mag, k/mag, &r);
+		//make_ray(0, 1000, 0, i/mag, j/mag, k/mag, &r);
+
+		// have 1 bounce of indirect illumination
+		return sample_ray(r, 1);
+	}
+
+	data::pixel<float> sample_ray(ray& r, int recurse_depth) const
+	{
+		data::pixel<float> output;
+
+		octree::sub_location node_sub_loc;
+		data::block hit_block;
+
+		if(cast_ray(r, node_sub_loc, hit_block))
+		{
+			// we hit the world, is it OK to recurse down?
+			if(recurse_depth < 0)
+			{
+				// no, return blackness
+				output.r = output.g = output.b = 0.f;
+				return output;
+			}
+
+			const octree::extent& node_ext = node_sub_loc.node_extent;
+
+			float mid_x = static_cast<float>(node_ext.loc.x) + 0.5f * static_cast<float>(node_ext.size);
+			float mid_y = static_cast<float>(node_ext.loc.y) + 0.5f * static_cast<float>(node_ext.size);
+			float mid_z = static_cast<float>(node_ext.loc.z) + 0.5f * static_cast<float>(node_ext.size);
+
+			float hit_x = node_sub_loc.coords[0];
+			float hit_y = node_sub_loc.coords[1];
+			float hit_z = node_sub_loc.coords[2];
+
+			float to_obs_x = hit_x - r.x;
+			float to_obs_y = hit_y - r.y;
+			float to_obs_z = hit_z - r.z;
+			float mag_to_obs = sqrt(to_obs_x*to_obs_x + to_obs_y*to_obs_y + to_obs_z*to_obs_z);
+			to_obs_x /= mag_to_obs;
+			to_obs_y /= mag_to_obs;
+			to_obs_z /= mag_to_obs;
+
+			float normal_x = hit_x - mid_x;
+			float normal_y = hit_y - mid_y;
+			float normal_z = hit_z - mid_z;
+
+			// convert the spherical normal into a cubical one...
+			float abs_x = fabs(normal_x), abs_y = fabs(normal_y), abs_z = fabs(normal_z);
+			float almost_one = 0.9999f;
+
+			if((almost_one*abs_x > abs_y) && (almost_one*abs_x > abs_z))
+			{
+				normal_x = normal_x > 0.f ? 1.f : -1.f;
+				normal_y = normal_z = 0.f;
+			}
+			else if((almost_one*abs_y > abs_x) && (almost_one*abs_y > abs_z))
+			{
+				normal_y = normal_y > 0.f ? 1.f : -1.f;
+				normal_x = normal_z = 0.f;
+			}
+			else if((almost_one*abs_z > abs_x) && (almost_one*abs_z > abs_y))
+			{
+				normal_z = normal_z > 0.f ? 1.f : -1.f;
+				normal_x = normal_y = 0.f;
+			}
+			else
+			{
+				float mag_normal = sqrt(normal_x*normal_x + normal_y*normal_y + normal_z*normal_z);
+				normal_x /= mag_normal;
+				normal_y /= mag_normal;
+				normal_z /= mag_normal;
+			}
+
+			uint8_t block_id = hit_block.id;
+			switch(block_id)
+			{
+				case mc::Stone:
+					output.r = output.g = output.b = 0x33;
+					break;
+				case mc::Grass:
+					output.r = 0x00; output.g = 0x7f; output.b = 0x00;
+					break;
+				case mc::Wood:
+				case mc::Log:
+					output.r = 0x30; output.g = 0x30; output.b = 0x00;
+					break;
+				case mc::Dirt:
+					output.r = 0x60; output.g = 0x60; output.b = 0x00;
+					break;
+				case mc::Sand:
+					output.r = 0xe0; output.g = 0xe0; output.b = 0x00;
+					break;
+				case mc::Water:
+				case mc::StationaryWater:
+					output.r = 0x00; output.g = 0x00; output.b = 0x80;
+					break;
+				case mc::Leaves:
+					output.r = 0x00; output.g = 0xff; output.b = 0x00;
+					break;
+				default:
+					//std::cout << "unknown block: 0x" << std::hex << (int) block_id << std::endl;
+					output.r = output.g = output.b = 0x7f;
+					break;
+			}
+
+			output.r /= 0xff; output.g /= 0xff; output.b /= 0xff;
+
+			data::pixel<float> surface_colour = output;
+
+			output.r = output.g = output.b = 0.f;
+
+			// quick and dirty AO implementation
+			const int n_samples = 4;
+			for(int sample_idx = 0; sample_idx < n_samples; ++sample_idx)
+			{
+				ray bounce_ray;
+				sample_spherical_ray(hit_x, hit_y, hit_z, &bounce_ray);
+
+				float contribution = (bounce_ray.i*normal_x + bounce_ray.j*normal_y + bounce_ray.k*normal_z);
+
+				if(contribution < 0.f)
+				{
+					contribution = -contribution;
+					make_ray(bounce_ray.x, bounce_ray.y, bounce_ray.z,
+							-bounce_ray.i, -bounce_ray.j, -bounce_ray.k, &bounce_ray);
+				}
+
+				data::pixel<float> sample = sample_ray(bounce_ray, recurse_depth - 1);
+				output = output + (surface_colour * sample * contribution);
+			}
+			output = output / n_samples;
+		}
+		else
+		{
+			// we didn't hit the world, sample the sky
+			output = sample_sky(r);
+		}
 
 		return output;
 	}
@@ -376,7 +538,7 @@ struct main_program
 				{
 					float fx(x), fy(y);
 					data::pixel<float> pixel_value =
-						sample(fx+uniform_real()-0.5f, fy+uniform_real()-0.5f, w, h);
+						sample_pixel(fx+uniform_real()-0.5f, fy+uniform_real()-0.5f, w, h);
 
 					*out = *out + pixel_value;
 					*out_sq = *out_sq + pixel_value * pixel_value;
@@ -476,171 +638,6 @@ struct main_program
 		}
 
 		return 0;
-	}
-
-	data::pixel<float> sample(float fx, float fy, int w, int h)
-	{
-		data::pixel<float> output;
-
-		ray r;
-
-		fx -= w>>1; fy -= h>>1;
-
-		//float i(fx), k(fy), j(-0.5f*h);
-		float i(fx), j(fy), k(h);
-
-
-		float pitch = 10.f * (2.f*3.14159f/360.f);
-		float yaw = -30.f * (2.f*3.14159f/360.f);
-
-		float cp = cos(pitch), sp = sin(pitch);
-		float new_j = cp*j - sp*k, new_k = sp*j + cp*k;
-		j = new_j; k = new_k;
-
-		float cy = cos(yaw), sy = sin(yaw);
-		float new_i = cy*i - sy*k, new_k2 = sy*i + cy*k;
-		i = new_i; k = new_k2;
-
-		float mag = sqrt(i*i + j*j + k*k);
-		make_ray(107.2, 77.8f, 87.1, i/mag, j/mag, k/mag, &r);
-		//make_ray(0, 1000, 0, i/mag, j/mag, k/mag, &r);
-
-		octree::sub_location node_sub_loc;
-		data::block hit_block;
-
-		if(cast_ray(r, node_sub_loc, hit_block))
-		{
-			const octree::extent& node_ext = node_sub_loc.node_extent;
-
-			float mid_x = static_cast<float>(node_ext.loc.x) + 0.5f * static_cast<float>(node_ext.size);
-			float mid_y = static_cast<float>(node_ext.loc.y) + 0.5f * static_cast<float>(node_ext.size);
-			float mid_z = static_cast<float>(node_ext.loc.z) + 0.5f * static_cast<float>(node_ext.size);
-
-			float hit_x = node_sub_loc.coords[0];
-			float hit_y = node_sub_loc.coords[1];
-			float hit_z = node_sub_loc.coords[2];
-
-			float to_obs_x = hit_x - r.x;
-			float to_obs_y = hit_y - r.y;
-			float to_obs_z = hit_z - r.z;
-			float mag_to_obs = sqrt(to_obs_x*to_obs_x + to_obs_y*to_obs_y + to_obs_z*to_obs_z);
-			to_obs_x /= mag_to_obs;
-			to_obs_y /= mag_to_obs;
-			to_obs_z /= mag_to_obs;
-
-			float normal_x = hit_x - mid_x;
-			float normal_y = hit_y - mid_y;
-			float normal_z = hit_z - mid_z;
-
-#if 1
-			float abs_x = fabs(normal_x), abs_y = fabs(normal_y), abs_z = fabs(normal_z);
-			float almost_one = 0.9999f;
-
-			if((almost_one*abs_x > abs_y) && (almost_one*abs_x > abs_z))
-			{
-				normal_x = normal_x > 0.f ? 1.f : -1.f;
-				normal_y = normal_z = 0.f;
-			}
-			else if((almost_one*abs_y > abs_x) && (almost_one*abs_y > abs_z))
-			{
-				normal_y = normal_y > 0.f ? 1.f : -1.f;
-				normal_x = normal_z = 0.f;
-			}
-			else if((almost_one*abs_z > abs_x) && (almost_one*abs_z > abs_y))
-			{
-				normal_z = normal_z > 0.f ? 1.f : -1.f;
-				normal_x = normal_y = 0.f;
-			}
-			else
-			{
-				float mag_normal = sqrt(normal_x*normal_x + normal_y*normal_y + normal_z*normal_z);
-				//mag_normal = 0.5f * static_cast<float>(node_ext.size);
-				normal_x /= mag_normal;
-				normal_y /= mag_normal;
-				normal_z /= mag_normal;
-			}
-#endif
-
-			uint8_t block_id = hit_block.id;
-			switch(block_id)
-			{
-				case mc::Stone:
-					output.r = output.g = output.b = 0x33;
-					break;
-				case mc::Grass:
-					output.r = 0x00; output.g = 0x7f; output.b = 0x00;
-					break;
-				case mc::Wood:
-				case mc::Log:
-					output.r = 0x30; output.g = 0x30; output.b = 0x00;
-					break;
-				case mc::Dirt:
-					output.r = 0x60; output.g = 0x60; output.b = 0x00;
-					break;
-				case mc::Sand:
-					output.r = 0xe0; output.g = 0xe0; output.b = 0x00;
-					break;
-				case mc::Water:
-				case mc::StationaryWater:
-					output.r = 0x00; output.g = 0x00; output.b = 0x80;
-					break;
-				case mc::Leaves:
-					output.r = 0x00; output.g = 0xff; output.b = 0x00;
-					break;
-				default:
-					//std::cout << "unknown block: 0x" << std::hex << (int) block_id << std::endl;
-					output.r = output.g = output.b = 0x7f;
-					break;
-			}
-
-			output.r /= 0xff; output.g /= 0xff; output.b /= 0xff;
-
-			data::pixel<float> surface_colour = output;
-
-			output.r = output.g = output.b = 0.f;
-
-			// quick and dirty AO implementation
-			const int n_samples = 4;
-			int sample_count = 0;
-			while(sample_count < n_samples)
-			{
-				ray sample_ray;
-				sample_spherical_ray(hit_x, hit_y, hit_z, &sample_ray);
-
-				float contribution = (sample_ray.i*normal_x + sample_ray.j*normal_y + sample_ray.k*normal_z);
-
-				if(contribution < 0.f)
-				{
-					contribution = -contribution;
-					make_ray(sample_ray.x, sample_ray.y, sample_ray.z,
-							-sample_ray.i, -sample_ray.j, -sample_ray.k, &sample_ray);
-				}
-
-				octree::sub_location temp_sub_loc;
-				data::block temp_block;
-				if(!cast_ray(sample_ray, temp_sub_loc, temp_block))
-				{
-					data::pixel<float> sky = sample_sky(sample_ray);
-					output = output + (surface_colour * sky * contribution);
-				}
-
-				++sample_count;
-			}
-
-			output = output / n_samples;
-
-#if 0
-			output.r = 127 + (127*normal_x);
-			output.g = 127 + (127*normal_y);
-			output.b = 127 + (127*normal_z);
-#endif
-		}
-		else
-		{
-			output = sample_sky(r);
-		}
-
-		return output;
 	}
 };
 

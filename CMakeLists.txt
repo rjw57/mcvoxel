@@ -18,6 +18,11 @@ link_directories(${Boost_LIBRARY_DIRS})
 find_package(ZLIB REQUIRED)
 include_directories(${ZLIB_INCLUDE_DIR})
 
+find_package(PkgConfig REQUIRED)
+pkg_check_modules(GLIB REQUIRED glib-2.0)
+include_directories(${GLIB_INCLUDE_DIRS})
+link_directories(${GLIB_LIBRARY_DIRS})
+
 # Generic third-party library includes
 include_directories(third-party)
 
@@ -31,6 +36,13 @@ add_library(c10t-image third-party/c10t/src/image/color.cpp)
 
 # HDR image support
 add_library(hdrloader third-party/hdrloader/hdrloader.cpp)
+
+# Generic utility functions
+add_library(util
+	util/common.c
+	util/sampling.c
+	util/vector.c
+)
 
 add_executable(voxel
 	io.cpp
@@ -49,9 +61,7 @@ add_library(rayslope
 )
 
 target_link_libraries(voxel
-	c10t-mc c10t-image
-	rayslope
-	hdrloader
+	c10t-mc c10t-image rayslope hdrloader util
 	${Boost_FILESYSTEM_LIBRARY} ${Boost_SYSTEM_LIBRARY} ${Boost_IOSTREAMS_LIBRARY}
-	${ZLIB_LIBRARY}
+	${ZLIB_LIBRARY} ${GLIB_LIBRARIES}
 )
