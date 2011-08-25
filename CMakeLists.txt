@@ -44,6 +44,7 @@ add_library(util
 	util/vector.c
 )
 
+include_directories(${CMAKE_CURRENT_SOURCE_DIR})
 add_executable(voxel
 	io.cpp
 	main.cpp

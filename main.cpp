@@ -25,6 +25,8 @@
 
 #include <hdrloader/hdrloader.h>
 
+#include <util/sampling.h>
+
 #include "datamodel.hpp"
 #include "io.hpp"
 #include "octree.hpp"
@@ -345,20 +347,18 @@ struct main_program
 			const int n_samples = 4;
 			for(int sample_idx = 0; sample_idx < n_samples; ++sample_idx)
 			{
+				// sample a ray in a weighted cosine centred on the normal
+				Vector bounce_ray_dir = pt_sampling_cosine(pt_vector_make(normal_x, normal_y, normal_z, 0.f));
+
 				ray bounce_ray;
-				sample_spherical_ray(hit_x, hit_y, hit_z, &bounce_ray);
-
-				float contribution = (bounce_ray.i*normal_x + bounce_ray.j*normal_y + bounce_ray.k*normal_z);
-
-				if(contribution < 0.f)
-				{
-					contribution = -contribution;
-					make_ray(bounce_ray.x, bounce_ray.y, bounce_ray.z,
-							-bounce_ray.i, -bounce_ray.j, -bounce_ray.k, &bounce_ray);
-				}
+				make_ray(hit_x, hit_y, hit_z,
+						pt_vector_get_x(bounce_ray_dir),
+						pt_vector_get_y(bounce_ray_dir),
+						pt_vector_get_z(bounce_ray_dir),
+						&bounce_ray);
 
 				data::pixel<float> sample = sample_ray(bounce_ray, recurse_depth - 1);
-				output = output + (surface_colour * sample * contribution);
+				output = output + (surface_colour * sample);
 			}
 			output = output / n_samples;
 		}
