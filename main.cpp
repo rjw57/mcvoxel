@@ -156,7 +156,6 @@ static float gamma_est(float sample_mean, float sample_log_mean)
 
 struct main_program
 {
-	std::vector< octree::octree<data::block> > octrees;
 	std::vector<octree::crystalised_octree>    crystal_octrees;
 	HDRLoaderResult                            sky_light_probe;
 
@@ -164,21 +163,12 @@ struct main_program
 	{
 		float min_dist_sq = -1.f;
 
-		size_t hack_idx = 0;
-		BOOST_FOREACH(const octree::octree<data::block>& tree, octrees)
+		BOOST_FOREACH(const octree::crystalised_octree& tree, crystal_octrees)
 		{
 			octree::sub_location temp_sub_loc;
 
-			octree::crystalised_octree& cot = crystal_octrees[hack_idx];
-			++hack_idx;
-
-#if 0
-			if(!tree.ray_intersect(r, temp_sub_loc))
+			if(!tree.ray_intersect<data::block>(r, temp_sub_loc))
 				continue;
-#else
-			if(!cot.ray_intersect<data::block>(r, temp_sub_loc))
-				continue;
-#endif
 
 			float dx = (temp_sub_loc.coords[0] - r.x);
 			float dy = (temp_sub_loc.coords[1] - r.y);
@@ -187,10 +177,9 @@ struct main_program
 
 			if((min_dist_sq < 0.f) || (dist_sq < min_dist_sq))
 			{
-// assert(tree.get(temp_sub_loc.node_extent.loc) == data::block(static_cast<int32_t>(cot.get(temp_sub_loc.node_extent.loc))));
 				min_dist_sq = dist_sq;
 				out_sub_loc = temp_sub_loc;
-				out_block = data::block(static_cast<int32_t>(cot.get(temp_sub_loc.node_extent.loc)));
+				out_block = data::block(tree.get(temp_sub_loc.node_extent.loc));
 			}
 		}
 
@@ -254,17 +243,19 @@ struct main_program
 			mc::utils::level_coord rc = mc::utils::path_to_region_coord(region->get_path());
 			octree::location start_coord = octree::location(rc.get_x() * 8, 0, rc.get_z() * 8);
 
-			octrees.push_back(octree::octree<data::block>(9, start_coord, mc::Air));
-
-			std::for_each(level_coords.begin(), level_coords.end(), load_level(region, octrees.back()));
-			std::cout << " - raw node count " << octrees.back().node_count() << " nodes." << std::endl;
+			octree::octree<data::block> loaded_tree(9, start_coord, mc::Air);
+			std::for_each(level_coords.begin(), level_coords.end(), load_level(region, loaded_tree));
+			std::cout << " - raw node count " << loaded_tree.node_count() << " nodes." << std::endl;
 #if 0
 			std::cout << "   ... sparsifying" << std::endl;
-			sparsify(octrees.back());
+			sparsify(loaded_tree);
 #endif
 			std::cout << "   ... compacting" << std::endl;
-			octrees.back().compact();
-			std::cout << " - new node count " << octrees.back().node_count() << " nodes." << std::endl;
+			loaded_tree.compact();
+			std::cout << " - new node count " << loaded_tree.node_count() << " nodes." << std::endl;
+
+			// crystalise into a read-only form
+			crystal_octrees.push_back(octree::crystalised_octree(loaded_tree));
 		}
 #else
 		octrees.clear();
@@ -284,14 +275,7 @@ struct main_program
 		}
 #endif
 
-		crystal_octrees.clear();
-		crystal_octrees.reserve(octrees.size());
-		BOOST_FOREACH(const octree::octree<data::block>& t, octrees)
-		{
-			crystal_octrees.push_back(octree::crystalised_octree(t));
-		}
-
-#if 1
+#if 0
 		{
 			std::ofstream output("foo.dat");
 			output << crystal_octrees.size() << std::endl;

@@ -98,8 +98,6 @@ class octree
 	long node_count() const;
 	void compact();
 
-	bool ray_intersect(const ray& r, sub_location& out_sub_loc) const;
-
 	std::ostream& serialise(std::ostream& os) const;
 	std::istream& deserialise(std::istream& os);
 
