@@ -214,6 +214,24 @@ struct main_program
 
 	data::pixel<float> sample_sky(const ray& r) const
 	{
+#if 0
+		float c1 = fabs(r.i), c2 = fabs(r.k), c3 = r.j;
+		if(c1 < 0.f)
+			c1 = 0.f;
+		if(c2 < 0.f)
+			c2 = 0.f;
+		if(c3 < 0.f)
+			c3 = 0.f;
+
+		//c1 = 0.f;
+		//c2 = 0.f;
+
+		float strength = 30.f;
+		return (data::pixel<float>(1,0,0) * powf(c1,strength)
+			+ data::pixel<float>(0,1,0) * powf(c2,strength)
+			+ data::pixel<float>(0,0,1) * powf(c3,strength));
+#endif
+
 		float m = sqrt(r.i*r.i+r.j*r.j+r.k*r.k);
 		float theta = acos(r.j/m);
 		float phi = atan2(r.k, r.i);
@@ -244,8 +262,8 @@ struct main_program
 		//float i(fx), k(fy), j(-0.5f*h);
 		float i(fx), j(fy), k(h);
 
-		float pitch = 50.f * (2.f*3.14159f/360.f);
-		float yaw = -20.f * (2.f*3.14159f/360.f);
+		float pitch = 15.f * (2.f*3.14159f/360.f);
+		float yaw = 35.f * (2.f*3.14159f/360.f);
 
 		float cp = cos(pitch), sp = sin(pitch);
 		float new_j = cp*j - sp*k, new_k = sp*j + cp*k;
@@ -260,7 +278,7 @@ struct main_program
 		//make_ray(107.2, 75.8f, 102.1, i/mag, j/mag, k/mag, &r);
 		//make_ray(0, 800, 0, i/mag, j/mag, k/mag, &r);
 		//make_ray(107.2, 81.8, 102.1, i/mag, j/mag, k/mag, &r);
-		make_ray(0.f, 260.f, 0.f, i/mag, j/mag, k/mag, &r);
+		make_ray(200.f, 107.f, -100.f, i/mag, j/mag, k/mag, &r);
 
 		// have 2 bounces of indirect illumination
 		return sample_ray(r, 2);
@@ -342,11 +360,17 @@ struct main_program
 			case mc::Wood:
 				output = sample_terrain(4, 0, tx, ty);
 				break;
+			case mc::Cobblestone:
+				output = sample_terrain(0, 1, tx, ty);
+				break;
 			case mc::Log:
 				output = sample_terrain(4, 1, tx, ty);
 				break;
 			case mc::Sand:
 				output = sample_terrain(2, 1, tx, ty);
+				break;
+			case mc::CoalOre:
+				output = sample_terrain(2, 2, tx, ty);
 				break;
 			case mc::Water:
 			case mc::StationaryWater:
@@ -395,9 +419,14 @@ struct main_program
 			float normal_y = hit_y - mid_y;
 			float normal_z = hit_z - mid_z;
 
+			float mag_normal = sqrt(normal_x*normal_x + normal_y*normal_y + normal_z*normal_z);
+			normal_x /= mag_normal;
+			normal_y /= mag_normal;
+			normal_z /= mag_normal;
+
 			// convert the spherical normal into a cubical one...
 			float abs_x = fabs(normal_x), abs_y = fabs(normal_y), abs_z = fabs(normal_z);
-			float almost_one = 0.9999f;
+			float almost_one = 1.f;
 
 			if((almost_one*abs_x > abs_y) && (almost_one*abs_x > abs_z))
 			{
@@ -414,13 +443,6 @@ struct main_program
 				normal_z = normal_z > 0.f ? 1.f : -1.f;
 				normal_x = normal_y = 0.f;
 			}
-			else
-			{
-				float mag_normal = sqrt(normal_x*normal_x + normal_y*normal_y + normal_z*normal_z);
-				normal_x /= mag_normal;
-				normal_y /= mag_normal;
-				normal_z /= mag_normal;
-			}
 
 			data::pixel<float> surface_colour = block_surface_colour(hit_block, node_sub_loc,
 					normal_x, normal_y, normal_z);
@@ -428,40 +450,17 @@ struct main_program
 			output.r = output.g = output.b = 0.f;
 
 			// bounce samples
-			const int n_iterations = 1;
+			const int n_iterations = 4;
 			int samples_drawn = 0;
 			for(int iteration_idx = 0; iteration_idx < n_iterations; ++iteration_idx)
 			{
-#if 1
-				// firstly, we'll importance sample the sky. We choose a direction by rejection sampling
-				// cosine weighted samples. We'll give up if we get to a maximum # of samples with no
-				// result.
-				Vector sky_ray_dir;
-				bool sky_accepted = false;
-				data::pixel<float> sky_sample;
-
-				const int max_sky_samples = 256;
-				for(int sky_sample_idx = 0; !sky_accepted && (sky_sample_idx < max_sky_samples); ++sky_sample_idx)
+				// sample from the sky
+				for(int sky_sample_idx=0; sky_sample_idx<1; ++sky_sample_idx)
 				{
-					sky_ray_dir = pt_sampling_cosine(
-						pt_vector_make(normal_x, normal_y, normal_z, 0.f));
-					sky_sample = sample_sky(sky_ray_dir);
+					// sample a sky ray in a weighted cosine centred on the normal
+					Vector sky_ray_dir = pt_sampling_cosine(
+							pt_vector_make(normal_x, normal_y, normal_z, 0.f));
 
-					float sky_lum = rgb2y(sky_sample);
-					float prob_accept = sky_lum / sky_max_lum;
-
-					if(uniform_real() < prob_accept)
-					{
-						// samples are already normalise w.r.t luminosity
-						sky_sample = sky_sample / prob_accept;
-						sky_accepted = true;
-					}
-				}
-
-				if(sky_accepted)
-				{
-					// make a ray pointing from our intersection point to our sampled sky
-					// direction
 					ray sky_ray;
 					make_ray(hit_x, hit_y, hit_z,
 							pt_vector_get_x(sky_ray_dir),
@@ -469,16 +468,15 @@ struct main_program
 							pt_vector_get_z(sky_ray_dir),
 							&sky_ray);
 
-					// we see black if we intersect the world
+					data::pixel<float> sky_sample = sample_sky(sky_ray);
+
 					if(!cast_ray(sky_ray))
 					{
 						output = output + (surface_colour * sky_sample * 0.5f);
 					}
+					++samples_drawn;
 				}
-				++samples_drawn;
-#endif
 
-#if 1
 				// we need to decide whether to recursively sample the world as well
 				if(recurse_depth > 0)
 				{
@@ -497,7 +495,6 @@ struct main_program
 					output = output + (surface_colour * sample * 0.5f);
 					++samples_drawn;
 				}
-#endif
 			}
 			output = output / samples_drawn;
 		}
@@ -608,7 +605,7 @@ struct main_program
 		}
 
 		//const int w=850, h=480;
-		const int w=1280, h=720;
+		const int w=1280>>1, h=720>>1;
 		boost::shared_ptr< data::pixel<uint8_t> > pixels(new data::pixel<uint8_t>[w*h]);
 		boost::shared_ptr< data::pixel<float> > float_pixels(new data::pixel<float>[w*h]);
 		boost::shared_ptr< data::pixel<float> > float_pixels_sq(new data::pixel<float>[w*h]);
@@ -632,7 +629,7 @@ struct main_program
 			(n_samples_pixels.get())[idx] = 0;
 		}
 
-		const int32_t n_samples = 512;
+		const int32_t n_samples = 64;
 		for(int32_t sample_idx=0; sample_idx<n_samples; ++sample_idx)
 		{
 			std::cout << "pass " << sample_idx+1 << "/" << n_samples << std::endl;
@@ -693,7 +690,7 @@ struct main_program
 						local_sigma /= max_sigma;
 				}
 
-				if((sample_idx < 8) || (uniform_real() <= 0.25f + 0.75f * local_sigma))
+				if((sample_idx < 8) || (uniform_real() <= 0.33f + 0.66f * local_sigma))
 				{
 					float fx(x), fy(y);
 					data::pixel<float> pixel_value =
@@ -730,6 +727,7 @@ struct main_program
 			}
 
 			max_lum = sqrt(max_lum);
+			//max_lum = 1.f; // sqrt(max_lum);
 
 			for(int32_t idx=0, x=0, y=0; idx<w*h; ++idx)
 			{
