@@ -160,6 +160,14 @@ struct main_program
 {
 	std::vector<octree::crystalised_octree>    crystal_octrees;
 	HDRLoaderResult                            sky_light_probe;
+	float                                      sky_max_lum; // for importance sampling
+
+	bool cast_ray(const ray& r) const
+	{
+		octree::sub_location temp_sub_loc;
+		data::block temp_hit_block;
+		return cast_ray(r, temp_sub_loc, temp_hit_block);
+	}
 
 	bool cast_ray(const ray& r, octree::sub_location& out_sub_loc, data::block& out_block) const
 	{
@@ -186,6 +194,13 @@ struct main_program
 		}
 
 		return (min_dist_sq >= 0.f);
+	}
+
+	data::pixel<float> sample_sky(const Vector& v) const
+	{
+		ray temp_ray;
+		make_ray(0, 0, 0, pt_vector_get_x(v), pt_vector_get_y(v), pt_vector_get_z(v), &temp_ray);
+		return sample_sky(temp_ray);
 	}
 
 	data::pixel<float> sample_sky(const ray& r) const
@@ -220,8 +235,8 @@ struct main_program
 		//float i(fx), k(fy), j(-0.5f*h);
 		float i(fx), j(fy), k(h);
 
-		float pitch = 10.f * (2.f*3.14159f/360.f);
-		float yaw = -30.f * (2.f*3.14159f/360.f);
+		float pitch = -10.f * (2.f*3.14159f/360.f);
+		float yaw = 300.f * (2.f*3.14159f/360.f);
 
 		float cp = cos(pitch), sp = sin(pitch);
 		float new_j = cp*j - sp*k, new_k = sp*j + cp*k;
@@ -232,11 +247,12 @@ struct main_program
 		i = new_i; k = new_k2;
 
 		float mag = sqrt(i*i + j*j + k*k);
-		make_ray(107.2, 77.8f, 87.1, i/mag, j/mag, k/mag, &r);
+		//make_ray(107.2, 77.8f, 87.1, i/mag, j/mag, k/mag, &r);
+		make_ray(107.2, 65.8f, 102.1, i/mag, j/mag, k/mag, &r);
 		//make_ray(0, 1000, 0, i/mag, j/mag, k/mag, &r);
 
-		// have 1 bounce of indirect illumination
-		return sample_ray(r, 1);
+		// have 2 bounces of indirect illumination
+		return sample_ray(r, 2);
 	}
 
 	data::pixel<float> sample_ray(ray& r, int recurse_depth) const
@@ -248,14 +264,6 @@ struct main_program
 
 		if(cast_ray(r, node_sub_loc, hit_block))
 		{
-			// we hit the world, is it OK to recurse down?
-			if(recurse_depth < 0)
-			{
-				// no, return blackness
-				output.r = output.g = output.b = 0.f;
-				return output;
-			}
-
 			const octree::extent& node_ext = node_sub_loc.node_extent;
 
 			float mid_x = static_cast<float>(node_ext.loc.x) + 0.5f * static_cast<float>(node_ext.size);
@@ -343,24 +351,68 @@ struct main_program
 
 			output.r = output.g = output.b = 0.f;
 
-			// quick and dirty AO implementation
-			const int n_samples = 4;
-			for(int sample_idx = 0; sample_idx < n_samples; ++sample_idx)
+			// bounce samples
+			const int n_iterations = 1;
+			int samples_drawn = 0;
+			for(int iteration_idx = 0; iteration_idx < n_iterations; ++iteration_idx)
 			{
-				// sample a ray in a weighted cosine centred on the normal
-				Vector bounce_ray_dir = pt_sampling_cosine(pt_vector_make(normal_x, normal_y, normal_z, 0.f));
+				// firstly, we'll importance sample the sky. We choose a direction by rejection sampling
+				// cosine weighted samples
+				Vector sky_ray_dir;
+				data::pixel<float> sky_sample;
+				for(;;)
+				{
+					sky_ray_dir = pt_sampling_cosine(
+						pt_vector_make(normal_x, normal_y, normal_z, 0.f));
+					sky_sample = sample_sky(sky_ray_dir);
 
-				ray bounce_ray;
+					float sky_lum = rgb2y(sky_sample);
+					float prob_accept = sky_lum / sky_max_lum;
+
+					if(uniform_real() < prob_accept)
+					{
+						// samples are already normalise w.r.t luminosity
+						sky_sample = sky_sample / sky_lum;
+						break;
+					}
+				}
+
+				// make a ray pointing from our intersection point to our sampled sky
+				// direction
+				ray sky_ray;
 				make_ray(hit_x, hit_y, hit_z,
-						pt_vector_get_x(bounce_ray_dir),
-						pt_vector_get_y(bounce_ray_dir),
-						pt_vector_get_z(bounce_ray_dir),
-						&bounce_ray);
+						pt_vector_get_x(sky_ray_dir),
+						pt_vector_get_y(sky_ray_dir),
+						pt_vector_get_z(sky_ray_dir),
+						&sky_ray);
 
-				data::pixel<float> sample = sample_ray(bounce_ray, recurse_depth - 1);
-				output = output + (surface_colour * sample);
+				// we see black if we intersect the world
+				if(!cast_ray(sky_ray))
+				{
+					output = output + (surface_colour * sky_sample * 0.5f);
+				}
+				++samples_drawn;
+
+				// we need to decide whether to recursively sample the world as well
+				if(recurse_depth > 0)
+				{
+					// sample a ray in a weighted cosine centred on the normal
+					Vector bounce_ray_dir = pt_sampling_cosine(
+							pt_vector_make(normal_x, normal_y, normal_z, 0.f));
+
+					ray bounce_ray;
+					make_ray(hit_x, hit_y, hit_z,
+							pt_vector_get_x(bounce_ray_dir),
+							pt_vector_get_y(bounce_ray_dir),
+							pt_vector_get_z(bounce_ray_dir),
+							&bounce_ray);
+
+					data::pixel<float> sample = sample_ray(bounce_ray, recurse_depth - 1);
+					output = output + (surface_colour * sample * 0.5f);
+					++samples_drawn;
+				}
 			}
-			output = output / n_samples;
+			output = output / samples_drawn;
 		}
 		else
 		{
@@ -386,6 +438,18 @@ struct main_program
 		}
 
 		std::cout << "Loaded skybox size: " << sky_light_probe.width << "x" << sky_light_probe.height << std::endl;
+		// find sky max luminosity
+		sky_max_lum = 0;
+		for(int i=0; i<sky_light_probe.width*sky_light_probe.height; ++i)
+		{
+			float *sky_pix = sky_light_probe.cols + 3 * i;
+			data::pixel<float> p;
+			p.r = sky_pix[0];
+			p.g = sky_pix[1];
+			p.b = sky_pix[2];
+			sky_max_lum = std::max(sky_max_lum, rgb2y(p));
+		}
+		std::cout << "Maximum luminosity: " << sky_max_lum << std::endl;
 
 #if 1
 		mc::world world(argv[1]);
