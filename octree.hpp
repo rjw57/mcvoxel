@@ -52,11 +52,11 @@ struct extent
 		: loc(loc), size(size)
 	{ }
 
-	bool contains(const location& loc) const
+	bool contains(const location& tloc) const
 	{
-		if((loc.x < loc.x) || (loc.x >= loc.x + size)) return false;
-		if((loc.y < loc.y) || (loc.y >= loc.y + size)) return false;
-		if((loc.z < loc.z) || (loc.z >= loc.z + size)) return false;
+		if((tloc.x < loc.x) || (tloc.x >= loc.x + size)) return false;
+		if((tloc.y < loc.y) || (tloc.y >= loc.y + size)) return false;
+		if((tloc.z < loc.z) || (tloc.z >= loc.z + size)) return false;
 		return true;
 	}
 

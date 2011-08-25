@@ -476,22 +476,22 @@ inline bool record_cmp_(const boost::tuple<extent, size_t, float>& a, const boos
 }
 
 template<typename T>
-bool crystalised_octree::ray_intersect(const ray& r, sub_location& out_sub_loc) const
+bool crystalised_octree::ray_intersect(const ray& eye_ray_, sub_location& out_sub_loc) const
 {
+	// have to make a copy because of const correctness and I don't like const_casting...
+	ray eye_ray(eye_ray_);
+
 	// a node record is the extent of the node, it's index and the distance it's intersection is at
 	typedef boost::tuple<extent, size_t, float> node_record;
 
-	// convert the ray to one in this tree's frame
-	ray transformed_ray; make_ray(r.x-min_loc_.x, r.y-min_loc_.y, r.z-min_loc_.z, r.i, r.j, r.k, &transformed_ray);
-
-	// cache the transformed ray's origin
-	location transformed_origin(transformed_ray.x, transformed_ray.y, transformed_ray.z);
+	// cache the ray's origin
+	location eye_ray_origin(eye_ray.x, eye_ray.y, eye_ray.z);
 
 	// do we intersect this tree at all?
 	aabox root_box(extent_().make_aabox());
 
 	float distance;
-	if(!slopeint_mul(&transformed_ray, &root_box, &distance))
+	if(!slopeint_mul(&eye_ray, &root_box, &distance))
 		return false;
 
 	intersection_result result;
@@ -537,6 +537,9 @@ bool crystalised_octree::ray_intersect(const ray& r, sub_location& out_sub_loc) 
 				// optimisation: if this child is a leaf node and is transparent, skip it
 				if(!is_branch(saved_child_idx))
 				{
+					if(boost::get<0>(record).contains(eye_ray_origin))
+						continue;
+
 					T child_data(static_cast<int32_t>(data_->at(saved_child_idx)));
 
 					// skip transparent leaf nodes
@@ -549,7 +552,7 @@ bool crystalised_octree::ray_intersect(const ray& r, sub_location& out_sub_loc) 
 
 				// attempt to intersect ray with child
 				float distance;
-				if(slopeint_mul(&transformed_ray, &child_box, &distance))
+				if(slopeint_mul(&eye_ray, &child_box, &distance))
 				{
 					intersections[n_intersections] = node_record(child_ext, saved_child_idx, distance);
 					++n_intersections;
@@ -582,9 +585,9 @@ bool crystalised_octree::ray_intersect(const ray& r, sub_location& out_sub_loc) 
 			if(node_data.is_transparent())
 				continue;
 
-			out_sub_loc.coords[0] = transformed_ray.x + transformed_ray.i * distance;
-			out_sub_loc.coords[1] = transformed_ray.y + transformed_ray.j * distance;
-			out_sub_loc.coords[2] = transformed_ray.z + transformed_ray.k * distance;
+			out_sub_loc.coords[0] = eye_ray.x + eye_ray.i * distance;
+			out_sub_loc.coords[1] = eye_ray.y + eye_ray.j * distance;
+			out_sub_loc.coords[2] = eye_ray.z + eye_ray.k * distance;
 			out_sub_loc.node_extent = node_ext;
 
 			return true;

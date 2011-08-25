@@ -1,6 +1,3 @@
-#include <boost/iostreams/filtering_stream.hpp>
-#include <boost/iostreams/filter/zlib.hpp>
-
 #include "io.hpp"
 #include "octree.hpp"
 
@@ -107,39 +104,40 @@ const int32_t crystalised_octree::get(const location& loc) const
 	return static_cast<int32_t>(data_->at(node_idx));
 }
 
-std::ostream& crystalised_octree::serialise(std::ostream& os) const
+std::ostream& crystalised_octree::serialise(std::ostream& out) const
 {
-	namespace bio = boost::iostreams;
-	bio::filtering_ostream out;
-	out.push(bio::zlib_compressor());
-	out.push(os);
+	// check - write 0xbeefface
+	io::nbo::write(out, uint32_t(0xbeeffaceu));
 
 	// write the log-2 size
 	io::nbo::write(out, static_cast<uint32_t>(log_2_size_));
 
 	// write the location
-	io::nbo::write(out, static_cast<uint32_t>(min_loc_.x));
-	io::nbo::write(out, static_cast<uint32_t>(min_loc_.y));
-	io::nbo::write(out, static_cast<uint32_t>(min_loc_.z));
+	io::nbo::write(out, static_cast<int32_t>(min_loc_.x));
+	io::nbo::write(out, static_cast<int32_t>(min_loc_.y));
+	io::nbo::write(out, static_cast<int32_t>(min_loc_.z));
 
 	// write the data
-	io::nbo::write(out, static_cast<uint32_t>(data_->size()));
-	BOOST_FOREACH(const uint32_t& v, *(data_.get()))
+	uint32_t n_data = data_->size();
+	io::nbo::write(out, n_data);
+	for(uint32_t idx=0; idx<n_data; ++idx)
 	{
-		io::nbo::write(out, v);
+		io::nbo::write(out, data_->at(idx));
 	}
 
-	return os;
+	// check - write 0xdeadbeef
+	io::nbo::write(out, uint32_t(0xdeadbeefu));
+
+	return out;
 }
 
-std::istream& crystalised_octree::deserialise(std::istream& is)
+std::istream& crystalised_octree::deserialise(std::istream& in)
 {
-	namespace bio = boost::iostreams;
-	bio::filtering_istream in;
-	in.push(bio::zlib_decompressor());
-	in.push(is);
+	uint32_t check, l2s;
+	int32_t mlx, mly, mlz;
 
-	uint32_t l2s, mlx, mly, mlz;
+	io::nbo::read(in, check);
+	assert(check == 0xbeeffaceu);
 
 	// read the log-2 size
 	io::nbo::read(in, l2s);
@@ -165,7 +163,10 @@ std::istream& crystalised_octree::deserialise(std::istream& is)
 		data_->push_back(v);
 	}
 
-	return is;
+	io::nbo::read(in, check);
+	assert(check == 0xdeadbeefu);
+
+	return in;
 }
 
 }

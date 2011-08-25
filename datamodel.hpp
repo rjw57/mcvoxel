@@ -2,6 +2,7 @@
 #define DATAMODEL_HPP
 
 #include <stdint.h>
+#include <vector>
 
 #include <mc/blocks.hpp>
 
@@ -35,6 +36,9 @@ struct pixel
 {
 	T r,g,b;
 
+	pixel() : r(), g(), b() { }
+	pixel(const T& r, const T& g, const T& b) : r(r), g(g), b(b) { }
+
 	pixel<T> operator + (const pixel<T>& p);
 	pixel<T> operator - (const pixel<T>& p);
 	pixel<T> operator / (const pixel<T>& p);
@@ -49,7 +53,15 @@ struct pixel
 template<typename T>
 struct image
 {
-	int32_t width, height;
+	int32_t        width, height;
+	std::vector<T> pixels;
+
+	image();
+	image(const image& im);
+	const image<T>& operator = (const image<T>& im);
+
+	const T& at(int32_t x, int32_t y) const;
+	T& at(int32_t x, int32_t y);
 };
 
 }

@@ -18,10 +18,19 @@ link_directories(${Boost_LIBRARY_DIRS})
 find_package(ZLIB REQUIRED)
 include_directories(${ZLIB_INCLUDE_DIR})
 
+find_package(PNG REQUIRED)
+include_directories(${PNG_INCLUDE_DIR})
+add_definitions(${PNG_DEFINITIONS})
+
 find_package(PkgConfig REQUIRED)
+
 pkg_check_modules(GLIB REQUIRED glib-2.0)
 include_directories(${GLIB_INCLUDE_DIRS})
 link_directories(${GLIB_LIBRARY_DIRS})
+
+pkg_check_modules(GTHREAD REQUIRED gthread-2.0)
+include_directories(${GTHREAD_INCLUDE_DIRS})
+link_directories(${GTHREAD_LIBRARY_DIRS})
 
 # Generic third-party library includes
 include_directories(third-party)
@@ -64,5 +73,5 @@ add_library(rayslope
 target_link_libraries(voxel
 	c10t-mc c10t-image rayslope hdrloader util
 	${Boost_FILESYSTEM_LIBRARY} ${Boost_SYSTEM_LIBRARY} ${Boost_IOSTREAMS_LIBRARY}
-	${ZLIB_LIBRARY} ${GLIB_LIBRARIES}
+	${ZLIB_LIBRARY} ${GLIB_LIBRARIES} ${GTHREAD_LIBRARIES} ${PNG_LIBRARIES}
 )

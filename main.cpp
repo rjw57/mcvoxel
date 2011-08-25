@@ -6,7 +6,13 @@
 #include <stdexcept>
 #include <sstream>
 
+#include <glib.h>
+
 #include <boost/foreach.hpp>
+
+#include <boost/iostreams/device/file.hpp>
+#include <boost/iostreams/filtering_stream.hpp>
+#include <boost/iostreams/filter/zlib.hpp>
 
 #include <boost/random/mersenne_twister.hpp>
 #include <boost/random/uniform_real.hpp>
@@ -162,6 +168,9 @@ struct main_program
 	HDRLoaderResult                            sky_light_probe;
 	float                                      sky_max_lum; // for importance sampling
 
+	data::image<data::pixel<float> >           terrain_colour;
+	data::image<float>                         terrain_alpha;
+
 	bool cast_ray(const ray& r) const
 	{
 		octree::sub_location temp_sub_loc;
@@ -235,8 +244,8 @@ struct main_program
 		//float i(fx), k(fy), j(-0.5f*h);
 		float i(fx), j(fy), k(h);
 
-		float pitch = -10.f * (2.f*3.14159f/360.f);
-		float yaw = 300.f * (2.f*3.14159f/360.f);
+		float pitch = 50.f * (2.f*3.14159f/360.f);
+		float yaw = -20.f * (2.f*3.14159f/360.f);
 
 		float cp = cos(pitch), sp = sin(pitch);
 		float new_j = cp*j - sp*k, new_k = sp*j + cp*k;
@@ -248,11 +257,111 @@ struct main_program
 
 		float mag = sqrt(i*i + j*j + k*k);
 		//make_ray(107.2, 77.8f, 87.1, i/mag, j/mag, k/mag, &r);
-		make_ray(107.2, 65.8f, 102.1, i/mag, j/mag, k/mag, &r);
-		//make_ray(0, 1000, 0, i/mag, j/mag, k/mag, &r);
+		//make_ray(107.2, 75.8f, 102.1, i/mag, j/mag, k/mag, &r);
+		//make_ray(0, 800, 0, i/mag, j/mag, k/mag, &r);
+		//make_ray(107.2, 81.8, 102.1, i/mag, j/mag, k/mag, &r);
+		make_ray(0.f, 260.f, 0.f, i/mag, j/mag, k/mag, &r);
 
 		// have 2 bounces of indirect illumination
 		return sample_ray(r, 2);
+	}
+
+	enum block_side { TOP, BOTTOM, SIDE };
+
+	data::pixel<float> sample_terrain(int bx, int by, float tx, float ty) const
+	{
+		assert((bx >= 0) && (bx < 16));
+		assert((by >= 0) && (by < 16));
+
+		int px = (bx << 4) + static_cast<int>(floor(tx * 16.f));
+		int py = (by << 4) + 15 - static_cast<int>(floor(ty * 16.f));
+
+		return terrain_colour.at(px, py);
+	}
+
+	data::pixel<float> block_surface_colour(
+			const data::block& block, const octree::sub_location hit_loc,
+			float nx, float ny, float nz) const
+	{
+		data::pixel<float> output;
+
+		// extract the fractional part of the intersection co-ord (this will be the texture)
+		float tmp, tx, ty;
+		float fx(fabs(modff(hit_loc.coords[0], &tmp)));
+		float fy(fabs(modff(hit_loc.coords[1], &tmp)));
+		float fz(fabs(modff(hit_loc.coords[2], &tmp)));
+
+		if(hit_loc.coords[0] < 0.f)
+			fx = 1.f - fx;
+		if(hit_loc.coords[1] < 0.f)
+			fy = 1.f - fy;
+		if(hit_loc.coords[2] < 0.f)
+			fz = 1.f - fz;
+
+		// work out which side of the block we are and the texture co-ord.
+		block_side side = SIDE;
+		if(ny > 0.95f)
+		{
+			side = TOP;
+			tx = fx; ty = fz;
+		}
+		else if(ny < -0.95f)
+		{
+			side = BOTTOM;
+			tx = fx; ty = fz;
+		}
+		else if(fabs(nx) > 0.95f)
+		{
+			side = SIDE;
+			tx = fz; ty = fy;
+		}
+		else if(fabs(nz) > 0.95f)
+		{
+			side = SIDE;
+			tx = fx; ty = fy;
+		}
+		else
+		{
+			// ????
+			tx = ty = 0.f;
+		}
+
+		switch(block.id)
+		{
+			case mc::Stone:
+				output = sample_terrain(1, 0, tx, ty);
+				break;
+			case mc::Dirt:
+				output = sample_terrain(2, 0, tx, ty);
+				break;
+			case mc::Grass:
+				output = sample_terrain(3, 0, tx, ty);
+				if(side == TOP)
+					output = sample_terrain(0, 0, tx, ty) * data::pixel<float>(0.f, 1.f, 0.f);
+				break;
+			case mc::Wood:
+				output = sample_terrain(4, 0, tx, ty);
+				break;
+			case mc::Log:
+				output = sample_terrain(4, 1, tx, ty);
+				break;
+			case mc::Sand:
+				output = sample_terrain(2, 1, tx, ty);
+				break;
+			case mc::Water:
+			case mc::StationaryWater:
+				output = data::pixel<float>(0.f, 0.f, 0.5f);
+				break;
+			case mc::Leaves:
+				output = sample_terrain(5, 3, tx, ty) * data::pixel<float>(0.f, 1.f, 0.f);
+				break;
+			default:
+				//std::cout << "unknown block: 0x" << std::hex << (int) block_id << std::endl;
+				output = data::pixel<float>(0.5f, 0.5f, 0.5f);
+				break;
+		}
+
+		return output;
 	}
 
 	data::pixel<float> sample_ray(ray& r, int recurse_depth) const
@@ -313,41 +422,8 @@ struct main_program
 				normal_z /= mag_normal;
 			}
 
-			uint8_t block_id = hit_block.id;
-			switch(block_id)
-			{
-				case mc::Stone:
-					output.r = output.g = output.b = 0x33;
-					break;
-				case mc::Grass:
-					output.r = 0x00; output.g = 0x7f; output.b = 0x00;
-					break;
-				case mc::Wood:
-				case mc::Log:
-					output.r = 0x30; output.g = 0x30; output.b = 0x00;
-					break;
-				case mc::Dirt:
-					output.r = 0x60; output.g = 0x60; output.b = 0x00;
-					break;
-				case mc::Sand:
-					output.r = 0xe0; output.g = 0xe0; output.b = 0x00;
-					break;
-				case mc::Water:
-				case mc::StationaryWater:
-					output.r = 0x00; output.g = 0x00; output.b = 0x80;
-					break;
-				case mc::Leaves:
-					output.r = 0x00; output.g = 0xff; output.b = 0x00;
-					break;
-				default:
-					//std::cout << "unknown block: 0x" << std::hex << (int) block_id << std::endl;
-					output.r = output.g = output.b = 0x7f;
-					break;
-			}
-
-			output.r /= 0xff; output.g /= 0xff; output.b /= 0xff;
-
-			data::pixel<float> surface_colour = output;
+			data::pixel<float> surface_colour = block_surface_colour(hit_block, node_sub_loc,
+					normal_x, normal_y, normal_z);
 
 			output.r = output.g = output.b = 0.f;
 
@@ -356,11 +432,16 @@ struct main_program
 			int samples_drawn = 0;
 			for(int iteration_idx = 0; iteration_idx < n_iterations; ++iteration_idx)
 			{
+#if 1
 				// firstly, we'll importance sample the sky. We choose a direction by rejection sampling
-				// cosine weighted samples
+				// cosine weighted samples. We'll give up if we get to a maximum # of samples with no
+				// result.
 				Vector sky_ray_dir;
+				bool sky_accepted = false;
 				data::pixel<float> sky_sample;
-				for(;;)
+
+				const int max_sky_samples = 256;
+				for(int sky_sample_idx = 0; !sky_accepted && (sky_sample_idx < max_sky_samples); ++sky_sample_idx)
 				{
 					sky_ray_dir = pt_sampling_cosine(
 						pt_vector_make(normal_x, normal_y, normal_z, 0.f));
@@ -372,27 +453,32 @@ struct main_program
 					if(uniform_real() < prob_accept)
 					{
 						// samples are already normalise w.r.t luminosity
-						sky_sample = sky_sample / sky_lum;
-						break;
+						sky_sample = sky_sample / prob_accept;
+						sky_accepted = true;
 					}
 				}
 
-				// make a ray pointing from our intersection point to our sampled sky
-				// direction
-				ray sky_ray;
-				make_ray(hit_x, hit_y, hit_z,
-						pt_vector_get_x(sky_ray_dir),
-						pt_vector_get_y(sky_ray_dir),
-						pt_vector_get_z(sky_ray_dir),
-						&sky_ray);
-
-				// we see black if we intersect the world
-				if(!cast_ray(sky_ray))
+				if(sky_accepted)
 				{
-					output = output + (surface_colour * sky_sample * 0.5f);
+					// make a ray pointing from our intersection point to our sampled sky
+					// direction
+					ray sky_ray;
+					make_ray(hit_x, hit_y, hit_z,
+							pt_vector_get_x(sky_ray_dir),
+							pt_vector_get_y(sky_ray_dir),
+							pt_vector_get_z(sky_ray_dir),
+							&sky_ray);
+
+					// we see black if we intersect the world
+					if(!cast_ray(sky_ray))
+					{
+						output = output + (surface_colour * sky_sample * 0.5f);
+					}
 				}
 				++samples_drawn;
+#endif
 
+#if 1
 				// we need to decide whether to recursively sample the world as well
 				if(recurse_depth > 0)
 				{
@@ -411,6 +497,7 @@ struct main_program
 					output = output + (surface_colour * sample * 0.5f);
 					++samples_drawn;
 				}
+#endif
 			}
 			output = output / samples_drawn;
 		}
@@ -430,6 +517,9 @@ struct main_program
 			std::cerr << "usage: " << argv[0] << " <path to world> <sky HDR image> <output PPM>" << std::endl;
 			return 1;
 		}
+
+		io::read_png("terrain.png", terrain_colour, terrain_alpha);
+		std::cout << "Read terrain at " << terrain_colour.width << " x " << terrain_colour.height << std::endl;
 
 		if(!HDRLoader::load(argv[2], sky_light_probe))
 		{
@@ -451,7 +541,7 @@ struct main_program
 		}
 		std::cout << "Maximum luminosity: " << sky_max_lum << std::endl;
 
-#if 1
+#if 0
 		mc::world world(argv[1]);
 
 		mc::region_iterator region_iterator(world.get_iterator());
@@ -483,37 +573,42 @@ struct main_program
 			// crystalise into a read-only form
 			crystal_octrees.push_back(octree::crystalised_octree(loaded_tree));
 		}
-#else
-		octrees.clear();
-		{
-			std::ifstream input("foo.dat");
-			size_t n_trees;
-			input >> n_trees;
-			std::cout << "tree count: " << n_trees << std::endl;
-			for(size_t i=0; i<n_trees; ++i)
-			{
-				octrees.push_back(octree::octree<data::block>(9));
-				input >> octrees.back();
-				std::cout << " - tree " << i+1 << " loaded with "
-					<< octrees.back().node_count() << " nodes." << std::endl;
-			}
-			input.close();
-		}
-#endif
 
-#if 0
 		{
-			std::ofstream output("foo.dat");
-			output << crystal_octrees.size() << std::endl;
+			namespace bio = boost::iostreams;
+			bio::filtering_ostream output;
+			output.push(bio::zlib_compressor());
+			output.push(bio::file_sink("foo.dat"));
+
+			uint32_t n_trees = crystal_octrees.size();
+			io::nbo::write(output, n_trees);
 			BOOST_FOREACH(const octree::crystalised_octree& tree, crystal_octrees)
 			{
 				tree.serialise(output);
 			}
-			output.close();
 		}
 #endif
 
-		const int w=850, h=480;
+		crystal_octrees.clear();
+		{
+			namespace bio = boost::iostreams;
+			bio::filtering_istream input;
+			input.push(bio::zlib_decompressor());
+			input.push(bio::file_source("foo.dat"));
+
+			uint32_t n_trees;
+			io::nbo::read(input, n_trees);
+			std::cout << "tree count: " << n_trees << std::endl;
+			for(size_t i=0; i<n_trees; ++i)
+			{
+				crystal_octrees.push_back(octree::crystalised_octree(0, octree::location(0,0,0)));
+				crystal_octrees.back().deserialise(input);
+				std::cout << " - tree " << i+1 << " loaded." << std::endl;
+			}
+		}
+
+		//const int w=850, h=480;
+		const int w=1280, h=720;
 		boost::shared_ptr< data::pixel<uint8_t> > pixels(new data::pixel<uint8_t>[w*h]);
 		boost::shared_ptr< data::pixel<float> > float_pixels(new data::pixel<float>[w*h]);
 		boost::shared_ptr< data::pixel<float> > float_pixels_sq(new data::pixel<float>[w*h]);
@@ -707,6 +802,7 @@ struct main_program
 
 int main(int argc, char** argv)
 {
+	g_thread_init(NULL);
 	main_program prog;
 	return prog(argc, argv);
 }

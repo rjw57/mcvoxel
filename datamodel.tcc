@@ -85,4 +85,34 @@ pixel<T> pixel<T>::operator * (const T& v)
 	return rv;
 }
 
+template<typename T>
+image<T>::image()
+	: width(0), height(0), pixels()
+{ }
+
+template<typename T>
+image<T>::image(const image& im)
+	: width(im.width), height(im.height), pixels(im.pixels)
+{ }
+
+template<typename T>
+const image<T>& image<T>::operator = (const image<T>& im)
+{
+	width = im.width;
+	height = im.height;
+	pixels = im.pixels;
+}
+
+template<typename T>
+const T& image<T>::at(int32_t x, int32_t y) const
+{
+	return pixels.at(x + y*width);
+}
+
+template<typename T>
+T& image<T>::at(int32_t x, int32_t y)
+{
+	return pixels.at(x + y*width);
+}
+
 }
