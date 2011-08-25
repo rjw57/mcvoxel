@@ -64,7 +64,7 @@ size_t crystalised_octree::child_containing(const location& loc, size_t node_idx
 	assert(node_ext.contains(loc));
 
 	// which child _should_ contain the point?
-	size_t which_child = index_of_child_containing(loc, node_ext.loc, node_ext.size);
+	size_t which_child = index_of_child_containing(loc, node_ext);
 
 	// move to that child
 	size_t child_idx = node_idx + 1;
@@ -84,7 +84,7 @@ size_t crystalised_octree::child_containing(const location& loc, size_t node_idx
 	}
 
 	// set the child extent and return the child index
-	r_child_ext = extent(location_of_child(which_child, node_ext.loc, node_ext.size), node_ext.size >> 1);
+	r_child_ext = extent(location_of_child(which_child, node_ext), node_ext.size >> 1);
 	return child_idx;
 }
 

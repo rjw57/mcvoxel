@@ -49,33 +49,33 @@ branch_node<T>::~branch_node()
 
 // INTERNAL UTILITY FUNCTIONS
 
-inline bool node_contains(const location& loc, const location& branch_loc, long branch_size)
+inline bool node_contains(const location& loc, const extent& branch_ext)
 {
-	if((loc.x < branch_loc.x) || (loc.x >= branch_loc.x + branch_size)) return false;
-	if((loc.y < branch_loc.y) || (loc.y >= branch_loc.y + branch_size)) return false;
-	if((loc.z < branch_loc.z) || (loc.z >= branch_loc.z + branch_size)) return false;
+	if((loc.x < branch_ext.loc.x) || (loc.x >= branch_ext.loc.x + branch_ext.size)) return false;
+	if((loc.y < branch_ext.loc.y) || (loc.y >= branch_ext.loc.y + branch_ext.size)) return false;
+	if((loc.z < branch_ext.loc.z) || (loc.z >= branch_ext.loc.z + branch_ext.size)) return false;
 	return true;
 }
 
-inline size_t index_of_child_containing(const location& loc, const location& branch_loc, long branch_size)
+inline size_t index_of_child_containing(const location& loc, const extent& branch_ext)
 {
-	assert(branch_size > 1);
-	assert(node_contains(loc, branch_loc, branch_size));
+	assert(branch_ext.size > 1);
+	assert(node_contains(loc, branch_ext));
 
-	long child_size = branch_size >> 1;
-	int dx = (loc.x >= branch_loc.x + child_size) ? 1 : 0;
-	int dy = (loc.y >= branch_loc.y + child_size) ? 1 : 0;
-	int dz = (loc.z >= branch_loc.z + child_size) ? 1 : 0;
+	long child_size = branch_ext.size >> 1;
+	int dx = (loc.x >= branch_ext.loc.x + child_size) ? 1 : 0;
+	int dy = (loc.y >= branch_ext.loc.y + child_size) ? 1 : 0;
+	int dz = (loc.z >= branch_ext.loc.z + child_size) ? 1 : 0;
 
 	return dx + (dy<<1) + (dz<<2);
 }
 
-inline location location_of_child(size_t child_idx, const location& branch_loc, long branch_size)
+inline location location_of_child(size_t child_idx, const extent& branch_ext)
 {
-	assert(branch_size > 1);
+	assert(branch_ext.size > 1);
 
-	location child_loc(branch_loc);
-	long child_size = branch_size >> 1;
+	location child_loc(branch_ext.loc);
+	long child_size = branch_ext.size >> 1;
 
 	if(child_idx & 0x1) child_loc.x += child_size;
 	if(child_idx & 0x2) child_loc.y += child_size;
@@ -119,7 +119,7 @@ template<typename T>
 const typename octree<T>::branch_or_leaf_node_t* octree<T>::get_leaf(
 		const location& loc, location& leaf_loc, long& leaf_size) const
 {
-	assert(node_contains(loc, first_loc_, size()));
+	assert(node_contains(loc, extent(first_loc_, size())));
 
 	const branch_or_leaf_node_t* leaf_node(&root_node_);
 	leaf_loc = first_loc_;
@@ -127,9 +127,9 @@ const typename octree<T>::branch_or_leaf_node_t* octree<T>::get_leaf(
 
 	while(const branch_node_t* p_branch_node = boost::get<branch_node_t>(leaf_node))
 	{
-		size_t child_idx = index_of_child_containing(loc, leaf_loc, leaf_size);
+		size_t child_idx = index_of_child_containing(loc, extent(leaf_loc, leaf_size));
 		leaf_node = &(p_branch_node->children[child_idx]);
-		leaf_loc = location_of_child(child_idx, leaf_loc, leaf_size);
+		leaf_loc = location_of_child(child_idx, extent(leaf_loc, leaf_size));
 		leaf_size >>= 1;
 	}
 
@@ -186,9 +186,9 @@ void octree<T>::set(const location& loc, const T& val)
 		branch_node_t* p_branch = boost::get<branch_node_t>(leaf_node);
 		assert(p_branch != NULL);
 
-		size_t child_idx = index_of_child_containing(loc, leaf_loc, leaf_size);
+		size_t child_idx = index_of_child_containing(loc, extent(leaf_loc, leaf_size));
 		leaf_node = &(p_branch->children[child_idx]);
-		leaf_loc = location_of_child(child_idx, leaf_loc, leaf_size);
+		leaf_loc = location_of_child(child_idx, extent(leaf_loc, leaf_size));
 		leaf_size >>= 1;
 	}
 
@@ -519,7 +519,7 @@ bool crystalised_octree::ray_intersect(const ray& r, sub_location& out_sub_loc) 
 			for(size_t i=0, child_idx = node_idx + 1; i<8; ++i)
 			{
 				// create a speculative record
-				extent child_ext(location_of_child(i, node_ext.loc, node_ext.size), node_ext.size >> 1);
+				extent child_ext(location_of_child(i, node_ext), node_ext.size >> 1);
 				size_t saved_child_idx(child_idx);
 
 				// advance to next child
