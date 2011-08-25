@@ -11,7 +11,7 @@ if(OPENMP_FOUND)
 endif(OPENMP_FOUND)
 
 # We need to boost libraries.
-find_package(Boost REQUIRED COMPONENTS filesystem system)
+find_package(Boost REQUIRED COMPONENTS filesystem iostreams system)
 include_directories(${Boost_INCLUDE_DIR})
 link_directories(${Boost_LIBRARY_DIRS})
 
@@ -52,6 +52,6 @@ target_link_libraries(voxel
 	c10t-mc c10t-image
 	rayslope
 	hdrloader
-	${Boost_FILESYSTEM_LIBRARY} ${Boost_SYSTEM_LIBRARY}
+	${Boost_FILESYSTEM_LIBRARY} ${Boost_SYSTEM_LIBRARY} ${Boost_IOSTREAMS_LIBRARY}
 	${ZLIB_LIBRARY}
 )

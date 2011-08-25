@@ -11,6 +11,16 @@ namespace io
 
 void write_ppm(std::ostream& os, data::pixel<uint8_t>* src, uint32_t w, uint32_t h);
 
+// generic writing and reading in network byte order
+namespace nbo
+{
+	std::ostream& write(std::ostream& os, uint32_t val);
+	std::ostream& write(std::ostream& os, uint16_t val);
+
+	std::istream& read(std::istream& is, uint32_t& r_val);
+	std::istream& read(std::istream& is, uint16_t& r_val);
+}
+
 }
 
 namespace octree { struct location; }

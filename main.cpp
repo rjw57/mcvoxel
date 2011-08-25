@@ -57,7 +57,7 @@ T rgb2y(const data::pixel<T>& p)
 
 struct load_level : public std::unary_function<const mc::utils::level_coord&, void>
 {
-	load_level(boost::shared_ptr<mc::region> region, octree::octree<uint8_t>& octree)
+	load_level(boost::shared_ptr<mc::region> region, octree::octree<data::block>& octree)
 		: region(region), octree(octree)
 	{ }
 
@@ -82,7 +82,7 @@ struct load_level : public std::unary_function<const mc::utils::level_coord&, vo
 			if(block_id != mc::Air)
 			{
 				octree::location loc(x + start_x, y, z + start_z);
-				octree.set(loc + offset, block_id);
+				octree.set(loc + offset, data::block(block_id));
 			}
 
 			// go to next co-ord
@@ -99,37 +99,8 @@ struct load_level : public std::unary_function<const mc::utils::level_coord&, vo
 	}
 
 	boost::shared_ptr<mc::region>   region;
-	octree::octree<uint8_t>&        octree;
+	octree::octree<data::block>&        octree;
 };
-
-template<typename T>
-const T* cast_ray(const ray& r, const std::vector< octree::octree<T> >& trees, octree::sub_location& out_sub_loc)
-{
-	const T* closest_node_p = NULL;
-	float min_dist_sq = 0.f;
-
-	BOOST_FOREACH(const octree::octree<T>& tree, trees)
-	{
-		octree::sub_location temp_sub_loc;
-
-		if(!tree.ray_intersect(r, temp_sub_loc))
-			continue;
-
-		float dx = (temp_sub_loc.coords[0] - r.x);
-		float dy = (temp_sub_loc.coords[1] - r.y);
-		float dz = (temp_sub_loc.coords[2] - r.z);
-		float dist_sq = dx*dx + dy*dy + dz*dz;
-
-		if((closest_node_p == NULL) || (dist_sq < min_dist_sq))
-		{
-			closest_node_p = &(tree.get(temp_sub_loc.node_extent.loc));
-			min_dist_sq = dist_sq;
-			out_sub_loc = temp_sub_loc;
-		}
-	}
-
-	return closest_node_p;
-}
 
 
 template<typename T>
@@ -185,10 +156,46 @@ static float gamma_est(float sample_mean, float sample_log_mean)
 
 struct main_program
 {
-	std::vector< octree::octree<uint8_t> > octrees;
-	HDRLoaderResult                        sky_light_probe;
+	std::vector< octree::octree<data::block> > octrees;
+	std::vector<octree::crystalised_octree>    crystal_octrees;
+	HDRLoaderResult                            sky_light_probe;
 
-	float light_x, light_y, light_z;
+	bool cast_ray(const ray& r, octree::sub_location& out_sub_loc, data::block& out_block)
+	{
+		float min_dist_sq = -1.f;
+
+		size_t hack_idx = 0;
+		BOOST_FOREACH(const octree::octree<data::block>& tree, octrees)
+		{
+			octree::sub_location temp_sub_loc;
+
+			octree::crystalised_octree& cot = crystal_octrees[hack_idx];
+			++hack_idx;
+
+#if 0
+			if(!tree.ray_intersect(r, temp_sub_loc))
+				continue;
+#else
+			if(!cot.ray_intersect<data::block>(r, temp_sub_loc))
+				continue;
+#endif
+
+			float dx = (temp_sub_loc.coords[0] - r.x);
+			float dy = (temp_sub_loc.coords[1] - r.y);
+			float dz = (temp_sub_loc.coords[2] - r.z);
+			float dist_sq = dx*dx + dy*dy + dz*dz;
+
+			if((min_dist_sq < 0.f) || (dist_sq < min_dist_sq))
+			{
+// assert(tree.get(temp_sub_loc.node_extent.loc) == data::block(static_cast<int32_t>(cot.get(temp_sub_loc.node_extent.loc))));
+				min_dist_sq = dist_sq;
+				out_sub_loc = temp_sub_loc;
+				out_block = data::block(static_cast<int32_t>(cot.get(temp_sub_loc.node_extent.loc)));
+			}
+		}
+
+		return (min_dist_sq >= 0.f);
+	}
 
 	data::pixel<float> sample_sky(const ray& r) const
 	{
@@ -247,7 +254,7 @@ struct main_program
 			mc::utils::level_coord rc = mc::utils::path_to_region_coord(region->get_path());
 			octree::location start_coord = octree::location(rc.get_x() * 8, 0, rc.get_z() * 8);
 
-			octrees.push_back(octree::octree<uint8_t>(9, start_coord, mc::Air));
+			octrees.push_back(octree::octree<data::block>(9, start_coord, mc::Air));
 
 			std::for_each(level_coords.begin(), level_coords.end(), load_level(region, octrees.back()));
 			std::cout << " - raw node count " << octrees.back().node_count() << " nodes." << std::endl;
@@ -259,18 +266,6 @@ struct main_program
 			octrees.back().compact();
 			std::cout << " - new node count " << octrees.back().node_count() << " nodes." << std::endl;
 		}
-
-#if 0
-		{
-			std::ofstream output("foo.dat");
-			output << octrees.size() << std::endl;
-			BOOST_FOREACH(const octree::octree<uint8_t>& tree, octrees)
-			{
-				output << tree;
-			}
-			output.close();
-		}
-#endif
 #else
 		octrees.clear();
 		{
@@ -280,12 +275,31 @@ struct main_program
 			std::cout << "tree count: " << n_trees << std::endl;
 			for(size_t i=0; i<n_trees; ++i)
 			{
-				octrees.push_back(octree::octree<uint8_t>(9));
+				octrees.push_back(octree::octree<data::block>(9));
 				input >> octrees.back();
 				std::cout << " - tree " << i+1 << " loaded with "
 					<< octrees.back().node_count() << " nodes." << std::endl;
 			}
 			input.close();
+		}
+#endif
+
+		crystal_octrees.clear();
+		crystal_octrees.reserve(octrees.size());
+		BOOST_FOREACH(const octree::octree<data::block>& t, octrees)
+		{
+			crystal_octrees.push_back(octree::crystalised_octree(t));
+		}
+
+#if 1
+		{
+			std::ofstream output("foo.dat");
+			output << crystal_octrees.size() << std::endl;
+			BOOST_FOREACH(const octree::crystalised_octree& tree, crystal_octrees)
+			{
+				tree.serialise(output);
+			}
+			output.close();
 		}
 #endif
 
@@ -297,15 +311,6 @@ struct main_program
 		boost::shared_ptr< float > luminance_pixels(new float[w*h]);
 		boost::shared_ptr< float > luminance_sq_pixels(new float[w*h]);
 		boost::shared_ptr< int > n_samples_pixels(new int[w*h]);
-
-		light_x = 1.f;
-		light_y = 4.f;
-		light_z = -1.f;
-		float light_mag = sqrt(light_x*light_x + light_y*light_y + light_z*light_z);
-
-		light_x /= light_mag;
-		light_y /= light_mag;
-		light_z /= light_mag;
 
 		for(int32_t idx=0; idx<w*h; ++idx)
 		{
@@ -419,8 +424,7 @@ struct main_program
 				}
 			}
 
-			// fudge factor!
-			max_lum *= 0.5f;
+			max_lum = sqrt(max_lum);
 
 			for(int32_t idx=0, x=0, y=0; idx<w*h; ++idx)
 			{
@@ -457,9 +461,9 @@ struct main_program
 					fout = mean;
 				}
 
-				fout.r = 255.f * sqrt(fout.r / max_lum);
-				fout.g = 255.f * sqrt(fout.g / max_lum);
-				fout.b = 255.f * sqrt(fout.b / max_lum);
+				fout.r = 255.f * sqrt(fout.r) / max_lum;
+				fout.g = 255.f * sqrt(fout.g) / max_lum;
+				fout.b = 255.f * sqrt(fout.b) / max_lum;
 
 				out->r = std::max(0, std::min(0xff, static_cast<int>(fout.r)));
 				out->g = std::max(0, std::min(0xff, static_cast<int>(fout.g)));
@@ -475,11 +479,6 @@ struct main_program
 				float local_sigma = sqrt(local_variance);
 				out->r = out->g = out->b = (250*local_sigma/max_sigma);
 #endif
-
-				if((idx & 0xff) == 0)
-				{
-					std::cout << 100*idx/(w*h) << "%\r" << std::flush;
-				}
 
 				++x;
 				if(x >= w)
@@ -523,9 +522,9 @@ struct main_program
 		//make_ray(0, 1000, 0, i/mag, j/mag, k/mag, &r);
 
 		octree::sub_location node_sub_loc;
-		const uint8_t* block_id_p = cast_ray(r, octrees, node_sub_loc);
+		data::block hit_block;
 
-		if(block_id_p != NULL)
+		if(cast_ray(r, node_sub_loc, hit_block))
 		{
 			const octree::extent& node_ext = node_sub_loc.node_extent;
 
@@ -578,7 +577,7 @@ struct main_program
 			}
 #endif
 
-			uint8_t block_id = *block_id_p;
+			uint8_t block_id = hit_block.id;
 			switch(block_id)
 			{
 				case mc::Stone:
@@ -624,8 +623,7 @@ struct main_program
 				ray sample_ray;
 				sample_spherical_ray(hit_x, hit_y, hit_z, &sample_ray);
 
-				float contribution = (1.f / (2.f * 3.14159f)) *
-					(sample_ray.i*normal_x + sample_ray.j*normal_y + sample_ray.k*normal_z);
+				float contribution = (sample_ray.i*normal_x + sample_ray.j*normal_y + sample_ray.k*normal_z);
 
 				if(contribution < 0.f)
 				{
@@ -635,7 +633,8 @@ struct main_program
 				}
 
 				octree::sub_location temp_sub_loc;
-				if(NULL == cast_ray(sample_ray, octrees, temp_sub_loc))
+				data::block temp_block;
+				if(!cast_ray(sample_ray, temp_sub_loc, temp_block))
 				{
 					data::pixel<float> sky = sample_sky(sample_ray);
 					output = output + (surface_colour * sky * contribution);

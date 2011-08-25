@@ -18,12 +18,19 @@
 #include <rayslope/slope.h>
 #include <rayslope/slopeint_mul.h>
 
-#include <mc/blocks.hpp>
-
 #include "io.hpp"
 
 namespace octree
 {
+
+// EXTENT METHODS
+
+inline ::aabox extent::make_aabox() const
+{
+	::aabox box;
+	::make_aabox(loc.x, loc.y, loc.z, loc.x+size, loc.y+size, loc.z+size, &box);
+	return box;
+}
 
 // BRANCH NODE MEMBERS
 
@@ -340,7 +347,7 @@ bool octree<T>::ray_intersect(const ray& r, sub_location& out_sub_loc) const
 		if(const leaf_node_t* leaf = boost::get<leaf_node_t>(node_p))
 		{
 			// is it transparent?
-			if(*leaf == mc::Air)
+			if(leaf->is_transparent())
 				continue;
 
 			float distance = boost::get<2>(record);
@@ -371,7 +378,7 @@ bool octree<T>::ray_intersect(const ray& r, sub_location& out_sub_loc) const
 				if(const leaf_node_t* leaf_child = boost::get<leaf_node_t>(node_p))
 				{
 					// skip transparent leaf nodes
-					if(*leaf_child == mc::Air)
+					if(leaf_child->is_transparent())
 						continue;
 
 					// skip leaf nodes containing the origin
@@ -491,7 +498,233 @@ std::istream& octree<T>::deserialise(std::istream& is)
 	return is;
 }
 
+// CRYSTALISED OCTREE
+
+template<typename T>
+crystalised_octree::crystalised_octree(const octree<T>& octree)
+	: log_2_size_(0), min_loc_(0,0,0)
+{
+	assign_from(octree);
 }
+
+template<typename T>
+void crystalised_octree::assign_from(const octree<T>& ot)
+{
+	typedef typename octree<T>::leaf_node_t leaf_node_t;
+	typedef typename octree<T>::branch_node_t branch_node_t;
+	typedef typename octree<T>::branch_or_leaf_node_t branch_or_leaf_node_t;
+
+	log_2_size_ = ot.log_2_size();
+	min_loc_ = ot.first_loc();
+
+	// we will build up the representation as a deque of uint32_t's.
+	std::deque<uint32_t> repr;
+
+	// create a stack of nodes to process
+	std::stack<const branch_or_leaf_node_t*> node_stack;
+	node_stack.push(&ot.root());
+
+	while(!node_stack.empty())
+	{
+		const branch_or_leaf_node_t* node_p = node_stack.top();
+		node_stack.pop();
+
+		if(const leaf_node_t* leaf_p = boost::get<leaf_node_t>(node_p))
+		{
+			// convert the leaf to a int32_t and check that the high-bit is unset
+			int32_t data = static_cast<int32_t>(*leaf_p);
+			assert(data >= 0);
+
+			// promote the int32 to a uint32 and check that the integer representation on this
+			// platform is sane!
+			uint32_t u32_data = data;
+			assert((u32_data & 0x80000000u) == 0);
+
+			repr.push_back(u32_data);
+		}
+		else if(const branch_node_t* branch_p = boost::get<branch_node_t>(node_p))
+		{
+			// how many descendant nodes in total does this node have?
+			int32_t n_descendants = 0;
+			std::stack<const branch_or_leaf_node_t*> nodes_to_examine;
+			nodes_to_examine.push(node_p);
+
+			// visit nodes in a depth-first way
+			while(nodes_to_examine.size() > 0)
+			{
+				++n_descendants;
+
+				const branch_or_leaf_node_t* next_node = nodes_to_examine.top();
+				nodes_to_examine.pop();
+
+				if(const branch_node_t* branch_p = boost::get<branch_node_t>(next_node))
+				{
+					for(int i=0; i<8; ++i)
+					{
+						nodes_to_examine.push(&branch_p->children[i]);
+					}
+				}
+			}
+
+			// don't count this node as one of its descendants
+			assert(n_descendants > 0);
+			--n_descendants;
+
+			// a branch is encoded by specifying the number of descendant nodes and setting the
+			// high bit. Therefore one can skip this node by skipping the n_descendants following
+			// nodes.
+			uint32_t data = 0x80000000u | static_cast<uint32_t>(n_descendants);
+
+			// signal this is a branch by pushing a uint32 with all bits set
+			repr.push_back(data);
+
+			// push children onto the stack, last child first
+			for(int i=0; i<8; ++i)
+			{
+				node_stack.push(&branch_p->children[7-i]);
+			}
+		}
+		else
+		{
+			assert(false);
+		}
+	}
+
+	// copy the representation into a new vector
+	data_ = boost::shared_ptr<std::vector<uint32_t> >(new std::vector<uint32_t>(repr.begin(), repr.end()));
+
+	std::cout << "crystalised octree with " << ot.node_count() << " nodes into "
+		<< data_->size() * sizeof(uint32_t) << " bytes." << std::endl;
+}
+
+// this is used by crystalised_octree::ray_intersect. Looking forward to C++11's lambdas yet?
+inline bool record_cmp_(const boost::tuple<extent, size_t, float>& a, const boost::tuple<extent, size_t, float>& b)
+{
+	return boost::get<2>(a) < boost::get<2>(b);
+}
+
+template<typename T>
+bool crystalised_octree::ray_intersect(const ray& r, sub_location& out_sub_loc) const
+{
+	// a node record is the extent of the node, it's index and the distance it's intersection is at
+	typedef boost::tuple<extent, size_t, float> node_record;
+
+	// convert the ray to one in this tree's frame
+	ray transformed_ray; make_ray(r.x-min_loc_.x, r.y-min_loc_.y, r.z-min_loc_.z, r.i, r.j, r.k, &transformed_ray);
+
+	// cache the transformed ray's origin
+	location transformed_origin(transformed_ray.x, transformed_ray.y, transformed_ray.z);
+
+	// do we intersect this tree at all?
+	aabox root_box(extent_().make_aabox());
+
+	float distance;
+	if(!slopeint_mul(&transformed_ray, &root_box, &distance))
+		return false;
+
+	intersection_result result;
+
+	// optimisation: only nodes which definitely intersect the ray are pushed on this stack
+	std::stack<node_record> nodes;
+	nodes.push(node_record(extent_(), 0, distance));
+	assert(nodes.size() > 0);
+
+	node_record intersections[8];
+
+	while(nodes.size() > 0)
+	{
+		const node_record& record = nodes.top();
+		nodes.pop();
+
+		const extent& node_ext = boost::get<0>(record);
+		size_t node_idx = boost::get<1>(record);
+
+		if(is_branch(node_idx))
+		{
+			size_t n_intersections = 0;
+
+			// iterate over all children
+			for(size_t i=0, child_idx = node_idx + 1; i<8; ++i)
+			{
+				// create a speculative record
+				extent child_ext(location_of_child(i, node_ext.loc, node_ext.size), node_ext.size >> 1);
+				size_t saved_child_idx(child_idx);
+
+				// advance to next child
+				if(is_branch(child_idx))
+				{
+					child_idx += 1 + (data_->at(child_idx) & 0x7fffffffu);
+				}
+				else
+				{
+					child_idx += 1;
+				}
+
+				// NB: DO NOT USE child_idx BELOW HERE, USE saved_child_idx
+
+				// optimisation: if this child is a leaf node and is transparent, skip it
+				if(!is_branch(saved_child_idx))
+				{
+					T child_data(static_cast<int32_t>(data_->at(saved_child_idx)));
+
+					// skip transparent leaf nodes
+					if(child_data.is_transparent())
+						continue;
+				}
+
+				// create a bounding box for the child
+				aabox child_box(child_ext.make_aabox());
+
+				// attempt to intersect ray with child
+				float distance;
+				if(slopeint_mul(&transformed_ray, &child_box, &distance))
+				{
+					intersections[n_intersections] = node_record(child_ext, saved_child_idx, distance);
+					++n_intersections;
+				}
+			}
+
+			// if no intersections, bail
+			if(n_intersections == 0)
+				continue;
+
+			// sort children by intersection distance
+			std::sort(intersections, intersections + n_intersections, record_cmp_);
+
+			// try to intersect recursively, push farthest first
+			for(size_t i=0; i<n_intersections; ++i)
+			{
+				nodes.push(intersections[n_intersections-1-i]);
+			}
+		}
+		else
+		{
+			float distance = boost::get<2>(record);
+			if(distance <= 0.f)
+				continue;
+
+			// extract the leaf data
+			T node_data(static_cast<int32_t>(data_->at(node_idx)));
+
+			// is it transparent?
+			if(node_data.is_transparent())
+				continue;
+
+			out_sub_loc.coords[0] = transformed_ray.x + transformed_ray.i * distance;
+			out_sub_loc.coords[1] = transformed_ray.y + transformed_ray.j * distance;
+			out_sub_loc.coords[2] = transformed_ray.z + transformed_ray.k * distance;
+			out_sub_loc.node_extent = node_ext;
+
+			return true;
+		}
+	}
+
+	return false;
+}
+
+}
+
+// IO OPERATORS
 
 template<typename T>
 std::istream& operator >> (std::istream& is, typename octree::octree<T>& tree)

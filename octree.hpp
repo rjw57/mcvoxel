@@ -2,10 +2,14 @@
 #define _OCTREE_HPP
 
 #include <iostream>
+#include <stdint.h>
+#include <vector>
 
+#include <boost/shared_ptr.hpp>
 #include <boost/variant.hpp>
 
 #include <rayslope/ray.h>
+#include <rayslope/aabox.h>
 
 namespace octree
 {
@@ -47,6 +51,16 @@ struct extent
 	extent(const location& loc, const long& size)
 		: loc(loc), size(size)
 	{ }
+
+	bool contains(const location& loc) const
+	{
+		if((loc.x < loc.x) || (loc.x >= loc.x + size)) return false;
+		if((loc.y < loc.y) || (loc.y >= loc.y + size)) return false;
+		if((loc.z < loc.z) || (loc.z >= loc.z + size)) return false;
+		return true;
+	}
+
+	::aabox make_aabox() const;
 };
 
 struct sub_location
@@ -99,6 +113,54 @@ class octree
 	int                   log_2_size_;
 	location              first_loc_;
 	branch_or_leaf_node_t root_node_;
+};
+
+// an octree than can *only* store +ve int32 values (i.e. high bit must be 0)
+// since crystalised_octrees are immutable, their data is implicitly shared.
+class crystalised_octree
+{
+	public:
+		crystalised_octree(int32_t log_2_size, const location& min_loc = location(0,0,0));
+		~crystalised_octree();
+
+		// copy and assignment constructors
+		crystalised_octree(const crystalised_octree& octree);
+		const crystalised_octree& operator = (const crystalised_octree& octree);
+
+		template<typename T>
+		explicit crystalised_octree(const octree<T>& octree);
+
+		// simple inline functions
+		int32_t size() const { return static_cast<int32_t>(1) << log_2_size_; }
+
+		// get the extent of this octree
+		extent extent_() const { return extent(min_loc_, size()); }
+
+		// retrieve data
+		const int32_t get(const location& loc) const;
+		const int32_t get(long x, long y, long z) const { return get(location(x,y,z)); }
+
+		// intersect ray (treating lead data as T). This requires T::is_transparent().
+		template<typename T>
+		bool ray_intersect(const ray& r, sub_location& out_sub_loc) const;
+
+		// serialisation
+		std::ostream& serialise(std::ostream& os) const;
+		std::istream& deserialise(std::istream& is);
+
+	protected:
+		bool is_branch(size_t idx) const { return (data_->at(idx) & 0x80000000u); }
+
+		size_t child_containing(const location& loc, size_t node_idx, const extent& node_ext,
+				extent& r_child_ext) const;
+
+		template<typename T>
+		void assign_from(const octree<T>& octree);
+
+	private:
+		int32_t                                   log_2_size_;
+		location                                  min_loc_;
+		boost::shared_ptr<std::vector<uint32_t> > data_;
 };
 
 }
