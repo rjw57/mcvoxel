@@ -506,10 +506,12 @@ bool crystalised_octree::ray_intersect(const ray& eye_ray_, sub_location& out_su
 	while(stack_top > 0)
 	{
 		// pop the top-most record from the stack
-		const node_record record = stack[--stack_top];
-
-		const extent& node_ext = boost::get<0>(record);
+		const node_record& record = stack[--stack_top];
+		const extent node_ext = boost::get<0>(record);
 		size_t node_idx = boost::get<1>(record);
+		float distance = boost::get<2>(record);
+
+		// NB: record gets clobbered below.
 
 		if(is_branch(node_idx))
 		{
@@ -539,7 +541,7 @@ bool crystalised_octree::ray_intersect(const ray& eye_ray_, sub_location& out_su
 				// optimisation: if this child is a leaf node and is transparent, skip it
 				if(!is_branch(saved_child_idx))
 				{
-					if(boost::get<0>(record).contains(eye_ray_origin))
+					if(node_ext.contains(eye_ray_origin))
 						continue;
 
 					T child_data(static_cast<int32_t>(data_->at(saved_child_idx)));
@@ -574,7 +576,6 @@ bool crystalised_octree::ray_intersect(const ray& eye_ray_, sub_location& out_su
 		}
 		else
 		{
-			float distance = boost::get<2>(record);
 			if(distance <= 0.f)
 				continue;
 
