@@ -215,7 +215,7 @@ struct main_program
 		// and hence f(t,p) <= M g(x) for some constant M.
 		//
 		// sampling from g() is easy we may therefore use rejection sampling to sample from f
-		for(;;)
+		for(int try_idx=0; try_idx<16; ++try_idx)
 		{
 			// sample from g()
 			sample_spherical_ray(x, y, z, &out_ray);
@@ -231,6 +231,8 @@ struct main_program
 				return sky / f;
 			}
 		}
+
+		return data::pixel<float>(0,0,0);
 	}
 
 	data::pixel<float> sample_sky(const Vector& v, float* sa = NULL) const
@@ -328,7 +330,7 @@ struct main_program
 		float i(fx), j(fy), k(h);
 
 		float pitch = 30.f * (2.f*3.14159f/360.f);
-		float yaw = -20.f * 35.f * (2.f*3.14159f/360.f);
+		float yaw = 20.f * 35.f * (2.f*3.14159f/360.f);
 
 		float cp = cos(pitch), sp = sin(pitch);
 		float new_j = cp*j - sp*k, new_k = sp*j + cp*k;
@@ -349,7 +351,7 @@ struct main_program
 		make_ray(-100, 130, -200, i/mag, j/mag, k/mag, &r);
 
 		// have 2 bounces of indirect illumination
-		return sample_ray(r, 2);
+		return sample_ray(r, 1);
 	}
 
 	enum block_side { TOP, BOTTOM, SIDE };
@@ -361,6 +363,9 @@ struct main_program
 
 		int px = (bx << 4) + static_cast<int>(floor(tx * 16.f));
 		int py = (by << 4) + 15 - static_cast<int>(floor(ty * 16.f));
+
+		px = std::max(0, std::min(terrain_colour.width-1, px));
+		py = std::max(0, std::min(terrain_colour.height-1, py));
 
 		return terrain_colour.at(px, py);
 	}
@@ -477,9 +482,9 @@ struct main_program
 			float hit_y = node_sub_loc.coords[1];
 			float hit_z = node_sub_loc.coords[2];
 
-			float to_obs_x = hit_x - r.x;
-			float to_obs_y = hit_y - r.y;
-			float to_obs_z = hit_z - r.z;
+			float to_obs_x = - hit_x + r.x;
+			float to_obs_y = - hit_y + r.y;
+			float to_obs_z = - hit_z + r.z;
 			float mag_to_obs = sqrt(to_obs_x*to_obs_x + to_obs_y*to_obs_y + to_obs_z*to_obs_z);
 			to_obs_x /= mag_to_obs;
 			to_obs_y /= mag_to_obs;
@@ -512,6 +517,20 @@ struct main_program
 			{
 				normal_z = normal_z > 0.f ? 1.f : -1.f;
 				normal_x = normal_y = 0.f;
+			}
+
+			// handle luminous blocks
+			const float glow_scale = 1.f * std::max(0.f,
+					to_obs_x*normal_x + to_obs_y*normal_y + to_obs_z*normal_z);
+			switch(hit_block.id)
+			{
+				case mc::Torch:
+					return data::pixel<float>(1,1,1) * glow_scale;
+					break;
+				case mc::Lava:
+				case mc::StationaryLava:
+					return data::pixel<float>(0.25,0.1,0.01) * glow_scale;
+					break;
 			}
 
 			data::pixel<float> surface_colour = block_surface_colour(hit_block, node_sub_loc,
@@ -649,6 +668,7 @@ struct main_program
 				integral += sky_pixel_solid_angle(sx, sy, sky_light_probe.width, sky_light_probe.height) * sky_lum;
 			}
 		}
+		sky_integral = integral;
 		std::cout << "sky light probe integral: " << integral << std::endl;
 		std::cout << "sky maximum luminosity: " << sky_max_lum << std::endl;
 
@@ -743,7 +763,7 @@ struct main_program
 			(n_samples_pixels.get())[idx] = 0;
 		}
 
-		const int32_t n_samples = 128;
+		const int32_t n_samples = 2048;
 		for(int32_t sample_idx=0; sample_idx<n_samples; ++sample_idx)
 		{
 			std::cout << "pass " << sample_idx+1 << "/" << n_samples << std::endl;
@@ -804,7 +824,7 @@ struct main_program
 						local_sigma /= max_sigma;
 				}
 
-				if((sample_idx < 8) || (uniform_real() <= 0.33f + 0.66f * local_sigma))
+				//if((sample_idx < 8) || (uniform_real() <= 0.33f + 0.66f * local_sigma))
 				{
 					float fx(x), fy(y);
 					data::pixel<float> pixel_value =
@@ -840,9 +860,7 @@ struct main_program
 				}
 			}
 
-			max_lum = sqrt(max_lum);
-			//max_lum = 1.f; // sqrt(max_lum);
-
+			float lum_scale = 2.f * 3.14159f / sky_integral;
 			for(int32_t idx=0, x=0, y=0; idx<w*h; ++idx)
 			{
 				data::pixel<float> fout = *(float_pixels.get() + idx);
@@ -856,31 +874,12 @@ struct main_program
 				{
 					// a better estimator based on assuming the distribution is gamma
 					data::pixel<float> mean = fout / (*p_n_samples);
-					data::pixel<float> mean_log = fout_log / (*p_n_samples);
-
-					fout.r = gamma_est(mean.r, mean_log.r);
-					fout.g = gamma_est(mean.g, mean_log.g);
-					fout.b = gamma_est(mean.b, mean_log.b);
-
-					/*
-					data::pixel<float> mean_sq = fout_sq / (*p_n_samples);
-					data::pixel<float> variance = mean_sq - mean*mean;
-					if(rgb2y(variance) > 0.f)
-					{
-						data::pixel<float> theta = variance / mean;
-						data::pixel<float> k = mean / theta;
-
-						if((rgb2y(k) >= 1.f))
-							fout = (k-1) * theta;
-					}
-					*/
-
-					fout = mean;
+					fout = mean * lum_scale;
 				}
 
-				fout.r = 255.f * sqrt(fout.r) / max_lum;
-				fout.g = 255.f * sqrt(fout.g) / max_lum;
-				fout.b = 255.f * sqrt(fout.b) / max_lum;
+				fout.r = 255.f * sqrt(fout.r);
+				fout.g = 255.f * sqrt(fout.g);
+				fout.b = 255.f * sqrt(fout.b);
 
 				out->r = std::max(0, std::min(0xff, static_cast<int>(fout.r)));
 				out->g = std::max(0, std::min(0xff, static_cast<int>(fout.g)));
