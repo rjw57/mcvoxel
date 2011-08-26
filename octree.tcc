@@ -496,17 +496,18 @@ bool crystalised_octree::ray_intersect(const ray& eye_ray_, sub_location& out_su
 
 	intersection_result result;
 
-	// optimisation: only nodes which definitely intersect the ray are pushed on this stack
-	std::stack<node_record> nodes;
-	nodes.push(node_record(extent_(), 0, distance));
-	assert(nodes.size() > 0);
+	// optimisation: only nodes which definitely intersect the ray are
+	// pushed on this stack. The worst case usage for this stack is 8 nodes
+	// right from root to leaf: log_2_size * 8.
+	node_record stack[log_2_size_ << 3]; int stack_top = 0; //< where to insert the next node
+	stack[stack_top++] = node_record(extent_(), 0, distance);
 
 	node_record intersections[8];
 
-	while(nodes.size() > 0)
+	while(stack_top > 0)
 	{
-		const node_record& record = nodes.top();
-		nodes.pop();
+		// pop the top-most record from the stack
+		const node_record& record = stack[--stack_top];
 
 		const extent& node_ext = boost::get<0>(record);
 		size_t node_idx = boost::get<1>(record);
@@ -569,7 +570,8 @@ bool crystalised_octree::ray_intersect(const ray& eye_ray_, sub_location& out_su
 			// try to intersect recursively, push farthest first
 			for(size_t i=0; i<n_intersections; ++i)
 			{
-				nodes.push(intersections[n_intersections-1-i]);
+				assert(stack_top < (log_2_size_ << 3));
+				stack[stack_top++] = intersections[n_intersections-1-i];
 			}
 		}
 		else
