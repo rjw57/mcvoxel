@@ -477,6 +477,7 @@ struct main_program
 		{
 			// we didn't hit the world, sample the sky
 			record(sample_sky(r));
+			return;
 		}
 
 		const octree::extent& node_ext = node_sub_loc.node_extent;
