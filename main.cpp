@@ -172,6 +172,10 @@ struct main_program
 	data::image<data::pixel<float> >           terrain_colour;
 	data::image<float>                         terrain_alpha;
 
+	typedef data::pixel<uint8_t> pixel_u8;
+	typedef data::pixel<float> pixel_f32;
+	typedef data::sample_recorder<pixel_f32> sample_recorder;
+
 	bool cast_ray(const ray& r) const
 	{
 		octree::sub_location temp_sub_loc;
@@ -320,7 +324,7 @@ struct main_program
 		return output;
 	}
 
-	data::pixel<float> sample_pixel(float fx, float fy, int w, int h) const
+	void sample_pixel(sample_recorder& record, float fx, float fy, int w, int h) const
 	{
 		ray r;
 
@@ -352,7 +356,7 @@ struct main_program
 		make_ray(-100, 500, -100, i/mag, j/mag, k/mag, &r);
 
 		// have 2 bounces of indirect illumination
-		return sample_ray(r, 1);
+		sample_ray(record, r, 1);
 	}
 
 	enum block_side { TOP, BOTTOM, SIDE };
@@ -464,176 +468,170 @@ struct main_program
 		return output;
 	}
 
-	data::pixel<float> sample_ray(ray& r, int recurse_depth) const
+	void sample_ray(sample_recorder& record, ray& r, int recurse_depth) const
 	{
-		data::pixel<float> output;
-
 		octree::sub_location node_sub_loc;
 		data::block hit_block;
 
-		if(cast_ray(r, node_sub_loc, hit_block))
+		if(!cast_ray(r, node_sub_loc, hit_block))
 		{
-			const octree::extent& node_ext = node_sub_loc.node_extent;
+			// we didn't hit the world, sample the sky
+			record(sample_sky(r));
+		}
 
-			float mid_x = static_cast<float>(node_ext.loc.x) + 0.5f * static_cast<float>(node_ext.size);
-			float mid_y = static_cast<float>(node_ext.loc.y) + 0.5f * static_cast<float>(node_ext.size);
-			float mid_z = static_cast<float>(node_ext.loc.z) + 0.5f * static_cast<float>(node_ext.size);
+		const octree::extent& node_ext = node_sub_loc.node_extent;
 
-			float hit_x = node_sub_loc.coords[0];
-			float hit_y = node_sub_loc.coords[1];
-			float hit_z = node_sub_loc.coords[2];
+		float mid_x = static_cast<float>(node_ext.loc.x) + 0.5f * static_cast<float>(node_ext.size);
+		float mid_y = static_cast<float>(node_ext.loc.y) + 0.5f * static_cast<float>(node_ext.size);
+		float mid_z = static_cast<float>(node_ext.loc.z) + 0.5f * static_cast<float>(node_ext.size);
 
-			float to_obs_x = - hit_x + r.x;
-			float to_obs_y = - hit_y + r.y;
-			float to_obs_z = - hit_z + r.z;
-			float mag_to_obs = sqrt(to_obs_x*to_obs_x + to_obs_y*to_obs_y + to_obs_z*to_obs_z);
-			to_obs_x /= mag_to_obs;
-			to_obs_y /= mag_to_obs;
-			to_obs_z /= mag_to_obs;
+		float hit_x = node_sub_loc.coords[0];
+		float hit_y = node_sub_loc.coords[1];
+		float hit_z = node_sub_loc.coords[2];
 
-			float normal_x = hit_x - mid_x;
-			float normal_y = hit_y - mid_y;
-			float normal_z = hit_z - mid_z;
+		float to_obs_x = - hit_x + r.x;
+		float to_obs_y = - hit_y + r.y;
+		float to_obs_z = - hit_z + r.z;
+		float mag_to_obs = sqrt(to_obs_x*to_obs_x + to_obs_y*to_obs_y + to_obs_z*to_obs_z);
+		to_obs_x /= mag_to_obs;
+		to_obs_y /= mag_to_obs;
+		to_obs_z /= mag_to_obs;
 
-			float mag_normal = sqrt(normal_x*normal_x + normal_y*normal_y + normal_z*normal_z);
-			normal_x /= mag_normal;
-			normal_y /= mag_normal;
-			normal_z /= mag_normal;
+		float normal_x = hit_x - mid_x;
+		float normal_y = hit_y - mid_y;
+		float normal_z = hit_z - mid_z;
 
-			// convert the spherical normal into a cubical one...
-			float abs_x = fabs(normal_x), abs_y = fabs(normal_y), abs_z = fabs(normal_z);
-			float almost_one = 1.f;
+		float mag_normal = sqrt(normal_x*normal_x + normal_y*normal_y + normal_z*normal_z);
+		normal_x /= mag_normal;
+		normal_y /= mag_normal;
+		normal_z /= mag_normal;
 
-			if((almost_one*abs_x > abs_y) && (almost_one*abs_x > abs_z))
+		// convert the spherical normal into a cubical one...
+		float abs_x = fabs(normal_x), abs_y = fabs(normal_y), abs_z = fabs(normal_z);
+		float almost_one = 1.f;
+
+		if((almost_one*abs_x > abs_y) && (almost_one*abs_x > abs_z))
+		{
+			normal_x = normal_x > 0.f ? 1.f : -1.f;
+			normal_y = normal_z = 0.f;
+		}
+		else if((almost_one*abs_y > abs_x) && (almost_one*abs_y > abs_z))
+		{
+			normal_y = normal_y > 0.f ? 1.f : -1.f;
+			normal_x = normal_z = 0.f;
+		}
+		else if((almost_one*abs_z > abs_x) && (almost_one*abs_z > abs_y))
+		{
+			normal_z = normal_z > 0.f ? 1.f : -1.f;
+			normal_x = normal_y = 0.f;
+		}
+
+		// handle luminous blocks
+		const float glow_scale = 1.f * std::max(0.f,
+				to_obs_x*normal_x + to_obs_y*normal_y + to_obs_z*normal_z);
+		switch(hit_block.id)
+		{
+			case mc::Torch:
+				record(data::pixel<float>(1,1,1) * glow_scale);
+				return; break;
+
+			case mc::Lava:
+			case mc::StationaryLava:
+				record(data::pixel<float>(0.25,0.1,0.01) * glow_scale);
+				return; break;
+		}
+
+		data::pixel<float> surface_colour = block_surface_colour(hit_block, node_sub_loc,
+				normal_x, normal_y, normal_z);
+
+		// for the sky (or, rather, it's luminosity) we want to evaluate the integral
+		// 
+		// I = \int sky(t,p) * max(0, cos((t,p) . normal)) dt dp [t == theta, p == phi]
+		// 
+		// let g1(t,p) be the spherical PDF sky(t,p)/[\int sky(t,p) dt dp] == sky(t,p)/sky_norm. then
+		//
+		// I = sky_norm \int g1(t,p) * max(0,cos((t,p) . normal)) dt dp
+		// 
+		// let g2(t,p) = max(0, cos((t,p) . normal)) / \int max(0, cos((t,p) /. normal)) dt dp = max(0, cos((t,p) . normal)) / pi
+		//
+		// then
+		//
+		// I = pi * sky_norm \int g1(t,p) * g2(t,p) dt dp where g1() and g2() are pdfs
+		//
+		// We can therefore evaluate the integral via
+		// importance sampling: viewing it as the expectation
+		// of g1 w.r.t. g2 or the expectation of g2 w.r.t. g1.
+		//
+		// We can draw samples from g2 analytically and can draw samples from g1 via rejection sampling.
+
+		// FIXME: is there some normalisation for the lambertian lighting BRDF?
+		const float lambertian_norm = 1.f; // 3.14159f;
+
+		// calculate expectation of g2 w.r.t. g1
+
+		// dont waste the opportunity just because we end up sampling a sky ray behind us
+		float g2 = 0.f;
+		for(int tries = 0; (g2 <= 0.f) && (tries < 4); ++tries)
+		{
+			pixel_f32 sky_sample(0,0,0);
+
+			// sample g1
+			ray g1_ray;
+			data::pixel<float> sky_colour = sample_sky_pdf(hit_x, hit_y, hit_z, g1_ray);
+
+			// calculate g2()
+			float g2 = g1_ray.i * normal_x + g1_ray.j * normal_y + g1_ray.k * normal_z;
+			if(g2 > 0.f)
 			{
-				normal_x = normal_x > 0.f ? 1.f : -1.f;
-				normal_y = normal_z = 0.f;
-			}
-			else if((almost_one*abs_y > abs_x) && (almost_one*abs_y > abs_z))
-			{
-				normal_y = normal_y > 0.f ? 1.f : -1.f;
-				normal_x = normal_z = 0.f;
-			}
-			else if((almost_one*abs_z > abs_x) && (almost_one*abs_z > abs_y))
-			{
-				normal_z = normal_z > 0.f ? 1.f : -1.f;
-				normal_x = normal_y = 0.f;
-			}
-
-			// handle luminous blocks
-			const float glow_scale = 1.f * std::max(0.f,
-					to_obs_x*normal_x + to_obs_y*normal_y + to_obs_z*normal_z);
-			switch(hit_block.id)
-			{
-				case mc::Torch:
-					return data::pixel<float>(1,1,1) * glow_scale;
-					break;
-				case mc::Lava:
-				case mc::StationaryLava:
-					return data::pixel<float>(0.25,0.1,0.01) * glow_scale;
-					break;
-			}
-
-			data::pixel<float> surface_colour = block_surface_colour(hit_block, node_sub_loc,
-					normal_x, normal_y, normal_z);
-
-			output.r = output.g = output.b = 0.f;
-
-			int samples_drawn = 0;
-
-			// for the sky (or, rather, it's luminosity) we want to evaluate the integral
-			// 
-			// I = \int sky(t,p) * max(0, cos((t,p) . normal)) dt dp [t == theta, p == phi]
-			// 
-			// let g1(t,p) be the spherical PDF sky(t,p)/[\int sky(t,p) dt dp] == sky(t,p)/sky_norm. then
-			//
-			// I = sky_norm \int g1(t,p) * max(0,cos((t,p) . normal)) dt dp
-			// 
-			// let g2(t,p) = max(0, cos((t,p) . normal)) / \int max(0, cos((t,p) /. normal)) dt dp = max(0, cos((t,p) . normal)) / pi
-			//
-			// then
-			//
-			// I = pi * sky_norm \int g1(t,p) * g2(t,p) dt dp where g1() and g2() are pdfs
-			//
-			// We can therefore evaluate the integral via
-			// importance sampling: viewing it as the expectation
-			// of g1 w.r.t. g2 or the expectation of g2 w.r.t. g1.
-			//
-			// We can draw samples from g2 analytically and can draw samples from g1 via rejection sampling.
-
-			// FIXME: is there some normalisation for the lambertian lighting BRDF?
-			const float lambertian_norm = 1.f; // 3.14159f;
-
-			// calculate expectation of g2 w.r.t. g1
-			for(int idx=0; idx < 1; ++idx)
-			{
-				// dont waste the opportunity just because we end up sampling a sky ray behind us
-				float g2 = 0.f;
-				for(int tries = 0; (g2 <= 0.f) && (tries < 4); ++tries)
+				// can we see the sky?
+				if(!cast_ray(g1_ray))
 				{
-					// sample g1
-					ray g1_ray;
-					data::pixel<float> sky_colour = sample_sky_pdf(hit_x, hit_y, hit_z, g1_ray);
-
-					// calculate g2()
-					float g2 = g1_ray.i * normal_x + g1_ray.j * normal_y + g1_ray.k * normal_z;
-					if(g2 > 0.f)
-					{
-						// can we see the sky?
-						if(!cast_ray(g1_ray))
-						{
-							output = output + (surface_colour * sky_colour * g2 * lambertian_norm * sky_integral);
-						}
-					}
-					++samples_drawn;
+					sky_sample = sky_colour * g2 * sky_integral;
 				}
 			}
-			
-			// calculate expectation of sky w.r.t. g2 (avoids having to divide and multiply by sky_norm)
-			for(int idx=0; idx < 1; ++idx)
+
+			// record the sky sample (including black samples)
+			record(sky_sample * surface_colour * lambertian_norm);
+		}
+		
+		// calculate expectation of sky w.r.t. g2 (avoids having to divide and multiply by sky_norm)
+	
+		// sample g2
+		Vector g2_ray_dir = pt_sampling_cosine(
+				pt_vector_make(normal_x, normal_y, normal_z, 0.f));
+
+		ray g2_ray;
+		make_ray(hit_x, hit_y, hit_z,
+				pt_vector_get_x(g2_ray_dir),
+				pt_vector_get_y(g2_ray_dir),
+				pt_vector_get_z(g2_ray_dir),
+				&g2_ray);
+
+		// we need to decide whether to recursively sample the world as well
+		if(recurse_depth > 0)
+		{
+			sample_recorder temp_recorder;
+			sample_ray(temp_recorder, g2_ray, recurse_depth - 1);
+
+			for(int i=0; i<temp_recorder.n_samples; ++i)
 			{
-				// sample g2
-				Vector g2_ray_dir = pt_sampling_cosine(
-						pt_vector_make(normal_x, normal_y, normal_z, 0.f));
-
-				ray g2_ray;
-				make_ray(hit_x, hit_y, hit_z,
-						pt_vector_get_x(g2_ray_dir),
-						pt_vector_get_y(g2_ray_dir),
-						pt_vector_get_z(g2_ray_dir),
-						&g2_ray);
-				
-				// by default we see blackness
-				data::pixel<float> sample(0,0,0);
-
-				// we need to decide whether to recursively sample the world as well
-				if(recurse_depth > 0)
-				{
-					sample = sample_ray(g2_ray, recurse_depth - 1);
-				}
-				else
-				{
-					// can we see the sky?
-					if(!cast_ray(g2_ray))
-					{
-						// calculate g1() * sky_norm
-						sample = sample_sky(g2_ray);
-					}
-				}
-
-				output = output + (surface_colour * sample * lambertian_norm);
-				++samples_drawn;
+				record(temp_recorder.sample_mean * surface_colour * lambertian_norm);
 			}
-
-			output = output / samples_drawn;
 		}
 		else
 		{
-			// we didn't hit the world, sample the sky
-			output = sample_sky(r);
-		}
+			// by default we see blackness
+			data::pixel<float> sample(0,0,0);
 
-		return output;
+			// can we see the sky?
+			if(!cast_ray(g2_ray))
+			{
+				// calculate g1() * sky_norm
+				sample = sample_sky(g2_ray);
+			}
+
+			record(sample * surface_colour * lambertian_norm);
+		}
 	}
 
 	int operator() (int argc, char** argv)
@@ -740,58 +738,14 @@ struct main_program
 		}
 
 		const int w=850, h=480;
-		//const int w=1280, h=720;
-		boost::shared_ptr< data::pixel<uint8_t> > pixels(new data::pixel<uint8_t>[w*h]);
-		boost::shared_ptr< data::pixel<float> > float_pixels(new data::pixel<float>[w*h]);
-		boost::shared_ptr< data::pixel<float> > float_pixels_sq(new data::pixel<float>[w*h]);
-		boost::shared_ptr< data::pixel<float> > float_pixels_log(new data::pixel<float>[w*h]);
-		boost::shared_ptr< float > luminance_pixels(new float[w*h]);
-		boost::shared_ptr< float > luminance_sq_pixels(new float[w*h]);
-		boost::shared_ptr< int > n_samples_pixels(new int[w*h]);
 
-		for(int32_t idx=0; idx<w*h; ++idx)
-		{
-			data::pixel<float>* out = float_pixels.get() + idx;
-			out->r = out->g = out->b = 0.f;
-
-			data::pixel<float>* out_sq = float_pixels_sq.get() + idx;
-			out_sq->r = out_sq->g = out_sq->b = 0.f;
-
-			data::pixel<float>* out_log = float_pixels_log.get() + idx;
-			out_log->r = out_log->g = out_log->b = 0.f;
-
-			(luminance_pixels.get())[idx] = (luminance_sq_pixels.get())[idx] = 0.f;
-			(n_samples_pixels.get())[idx] = 0;
-		}
+		std::vector<pixel_u8>        pixels(w*h);
+		std::vector<sample_recorder> recorders(w*h);
 
 		const int32_t n_samples = 2048;
 		for(int32_t sample_idx=0; sample_idx<n_samples; ++sample_idx)
 		{
 			std::cout << "pass " << sample_idx+1 << "/" << n_samples << std::endl;
-
-			float max_sigma = 0.f;
-			for(int32_t idx=0; idx<w*h; ++idx)
-			{
-				int *p_n_samples = n_samples_pixels.get() + idx;
-				if(*p_n_samples == 0)
-					continue;
-
-				float *p_luminance = luminance_pixels.get() + idx;
-				float *p_luminance_sq = luminance_sq_pixels.get() + idx;
-
-				float mu = *p_luminance / *p_n_samples;
-				float local_variance = (*p_luminance_sq / *p_n_samples) - mu*mu;
-				float local_sigma = 0.f;
-
-				if(local_variance > 0.f)
-					local_sigma = sqrt(local_variance);
-
-				// divide by local mean luminance
-				if(mu > 0.f)
-					local_sigma /= mu;
-
-				max_sigma = std::max(max_sigma, local_sigma);
-			}
 
 #			pragma omp parallel for schedule(dynamic, 1024)
 			for(int32_t idx=0; idx<w*h; ++idx)
@@ -799,113 +753,31 @@ struct main_program
 				int x = idx % w;
 				int y = h - 1 - idx / w;
 
-				data::pixel<float>* out = float_pixels.get() + idx;
-				data::pixel<float>* out_sq = float_pixels_sq.get() + idx;
-				data::pixel<float>* out_log = float_pixels_log.get() + idx;
-
-				int *p_n_samples = n_samples_pixels.get() + idx;
-				float *p_luminance = luminance_pixels.get() + idx;
-				float *p_luminance_sq = luminance_sq_pixels.get() + idx;
-
-				float local_sigma = 100.f;
-				if(*p_n_samples > 0)
-				{
-					float mu = *p_luminance / *p_n_samples;
-					float local_variance = (*p_luminance_sq / *p_n_samples) - mu*mu;
-					local_sigma = sqrt(local_variance);
-
-					if(local_variance > 0.f)
-						local_sigma = sqrt(local_variance);
-
-					// divide by local mean luminance
-					if(mu > 0.f)
-						local_sigma /= mu;
-
-					if(max_sigma > 0.f)
-						local_sigma /= max_sigma;
-				}
-
-				//if((sample_idx < 8) || (uniform_real() <= 0.33f + 0.66f * local_sigma))
-				{
-					float fx(x), fy(y);
-					data::pixel<float> pixel_value =
-						sample_pixel(fx+uniform_real()-0.5f, fy+uniform_real()-0.5f, w, h);
-
-					*out = *out + pixel_value;
-					*out_sq = *out_sq + pixel_value * pixel_value;
-
-					if(out->r > 0.f)
-						out_log->r += log(out->r);
-					if(out->g > 0.f)
-						out_log->g += log(out->g);
-					if(out->b > 0.f)
-						out_log->b += log(out->b);
-
-					*p_luminance += rgb2y(pixel_value);
-					*p_luminance_sq += rgb2y(pixel_value) * rgb2y(pixel_value);
-					*p_n_samples += 1;
-				}
+				float fx(x), fy(y);
+				sample_pixel(recorders[idx], fx+uniform_real()-0.5f, fy+uniform_real()-0.5f, w, h);
 			}
 
-			float max_lum = 0.f;
+			// rationale: a uniformly bright sky (with integral 4*pi) will result in a lambertian surface
+			// having brightness pi => want to scale brightness by 1/pi == 4/integral
+			float lum_scale = 4.f / sky_integral;
 			for(int32_t idx=0; idx<w*h; ++idx)
 			{
-				data::pixel<float> fout = *(float_pixels.get() + idx);
-				int *p_n_samples = n_samples_pixels.get() + idx;
+				const pixel_f32& mean = recorders[idx].sample_mean;
+				pixel_u8& out = pixels[idx];
 
-				if(*p_n_samples > 0)
-				{
-					// a better estimator based on assuming the distribution is gamma
-					data::pixel<float> mean = fout / (*p_n_samples);
-					max_lum = std::max(max_lum, rgb2y(mean));
-				}
-			}
-
-			float lum_scale = 2.f * 3.14159f / sky_integral;
-			for(int32_t idx=0, x=0, y=0; idx<w*h; ++idx)
-			{
-				data::pixel<float> fout = *(float_pixels.get() + idx);
-				data::pixel<float> fout_sq = *(float_pixels_sq.get() + idx);
-				data::pixel<float> fout_log = *(float_pixels_log.get() + idx);
-
-				data::pixel<uint8_t>* out = pixels.get() + idx;
-				int *p_n_samples = n_samples_pixels.get() + idx;
-
-				if(*p_n_samples > 0)
-				{
-					// a better estimator based on assuming the distribution is gamma
-					data::pixel<float> mean = fout / (*p_n_samples);
-					fout = mean * lum_scale;
-				}
+				pixel_f32 fout = mean * lum_scale;
 
 				fout.r = 255.f * sqrt(fout.r);
 				fout.g = 255.f * sqrt(fout.g);
 				fout.b = 255.f * sqrt(fout.b);
 
-				out->r = std::max(0, std::min(0xff, static_cast<int>(fout.r)));
-				out->g = std::max(0, std::min(0xff, static_cast<int>(fout.g)));
-				out->b = std::max(0, std::min(0xff, static_cast<int>(fout.b)));
-
-				//out->r = out->g = out->b = (250*(*p_n_samples))/(sample_idx+1);
-#if 0
-				float *p_luminance = luminance_pixels.get() + idx;
-				float *p_luminance_sq = luminance_sq_pixels.get() + idx;
-
-				float mu = *p_luminance / *p_n_samples
-				float local_variance = (*p_luminance_sq / *p_n_samples) - mu*mu;
-				float local_sigma = sqrt(local_variance);
-				out->r = out->g = out->b = (250*local_sigma/max_sigma);
-#endif
-
-				++x;
-				if(x >= w)
-				{
-					x = 0; --y;
-				}
+				out.r = std::max(0, std::min(0xff, static_cast<int>(fout.r)));
+				out.g = std::max(0, std::min(0xff, static_cast<int>(fout.g)));
+				out.b = std::max(0, std::min(0xff, static_cast<int>(fout.b)));
 			}
 
 			std::ofstream output_fstream(argv[3]);
-			io::write_ppm(output_fstream, pixels.get(), w, h);
+			io::write_ppm(output_fstream, &(pixels[0]), w, h);
 		}
 
 		return 0;

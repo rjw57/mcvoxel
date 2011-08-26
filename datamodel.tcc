@@ -6,7 +6,7 @@ namespace data
 {
 
 template<typename T>
-pixel<T> pixel<T>::operator + (const pixel<T>& p)
+pixel<T> pixel<T>::operator + (const pixel<T>& p) const
 {
 	pixel<T> rv;
 	rv.r = r + p.r;
@@ -16,7 +16,7 @@ pixel<T> pixel<T>::operator + (const pixel<T>& p)
 }
 
 template<typename T>
-pixel<T> pixel<T>::operator - (const pixel<T>& p)
+pixel<T> pixel<T>::operator - (const pixel<T>& p) const
 {
 	pixel<T> rv;
 	rv.r = r - p.r;
@@ -26,7 +26,7 @@ pixel<T> pixel<T>::operator - (const pixel<T>& p)
 }
 
 template<typename T>
-pixel<T> pixel<T>::operator / (const pixel<T>& p)
+pixel<T> pixel<T>::operator / (const pixel<T>& p) const
 {
 	pixel<T> rv;
 	rv.r = r / p.r;
@@ -36,7 +36,7 @@ pixel<T> pixel<T>::operator / (const pixel<T>& p)
 }
 
 template<typename T>
-pixel<T> pixel<T>::operator * (const pixel<T>& p)
+pixel<T> pixel<T>::operator * (const pixel<T>& p) const
 {
 	pixel<T> rv;
 	rv.r = r * p.r;
@@ -46,7 +46,7 @@ pixel<T> pixel<T>::operator * (const pixel<T>& p)
 }
 
 template<typename T>
-pixel<T> pixel<T>::operator + (const T& v)
+pixel<T> pixel<T>::operator + (const T& v) const
 {
 	pixel<T> rv;
 	rv.r = r + v;
@@ -56,7 +56,7 @@ pixel<T> pixel<T>::operator + (const T& v)
 }
 
 template<typename T>
-pixel<T> pixel<T>::operator - (const T& v)
+pixel<T> pixel<T>::operator - (const T& v) const
 {
 	pixel<T> rv;
 	rv.r = r - v;
@@ -66,7 +66,7 @@ pixel<T> pixel<T>::operator - (const T& v)
 }
 
 template<typename T>
-pixel<T> pixel<T>::operator / (const T& v)
+pixel<T> pixel<T>::operator / (const T& v) const
 {
 	pixel<T> rv;
 	rv.r = r / v;
@@ -76,7 +76,7 @@ pixel<T> pixel<T>::operator / (const T& v)
 }
 
 template<typename T>
-pixel<T> pixel<T>::operator * (const T& v)
+pixel<T> pixel<T>::operator * (const T& v) const
 {
 	pixel<T> rv;
 	rv.r = r * v;
@@ -113,6 +113,45 @@ template<typename T>
 T& image<T>::at(int32_t x, int32_t y)
 {
 	return pixels.at(x + y*width);
+}
+
+// SAMPLE RECORDER
+
+template<typename T>
+sample_recorder<T>::sample_recorder(const T& init_mean, const T& init_sq_mean)
+	: sample_mean(init_mean), sample_sq_mean(init_sq_mean), n_samples(0)
+{ }
+
+template<typename T>
+sample_recorder<T>::~sample_recorder()
+{ }
+
+template<typename T>
+sample_recorder<T>::sample_recorder(const sample_recorder<T>& sr)
+	: sample_mean(sr.sample_mean), sample_sq_mean(sr.sample_sq_mean), n_samples(sr.n_samples)
+{ }
+
+template<typename T>
+const sample_recorder<T>& sample_recorder<T>::operator = (const sample_recorder<T>& sr)
+{
+	sample_mean = sr.sample_mean;
+	sample_sq_mean = sr.sample_sq_mean;
+	n_samples = sr.n_samples;
+}
+
+template<typename T>
+void sample_recorder<T>::record(const T& sample)
+{
+	float f_n_samples = static_cast<float>(n_samples);
+	const T sample_sq = sample * sample;
+
+	sample_mean = sample_mean * (f_n_samples / (1.f + f_n_samples));
+	sample_mean = sample_mean + (sample / (1.f + f_n_samples));
+
+	sample_sq_mean = sample_sq_mean * (f_n_samples / (1.f + f_n_samples));
+	sample_sq_mean = sample_sq_mean + (sample_sq / (1.f + f_n_samples));
+
+	++n_samples;
 }
 
 }

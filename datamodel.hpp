@@ -39,15 +39,15 @@ struct pixel
 	pixel() : r(), g(), b() { }
 	pixel(const T& r, const T& g, const T& b) : r(r), g(g), b(b) { }
 
-	pixel<T> operator + (const pixel<T>& p);
-	pixel<T> operator - (const pixel<T>& p);
-	pixel<T> operator / (const pixel<T>& p);
-	pixel<T> operator * (const pixel<T>& p);
+	pixel<T> operator + (const pixel<T>& p) const;
+	pixel<T> operator - (const pixel<T>& p) const;
+	pixel<T> operator / (const pixel<T>& p) const;
+	pixel<T> operator * (const pixel<T>& p) const;
 
-	pixel<T> operator + (const T& v);
-	pixel<T> operator - (const T& v);
-	pixel<T> operator / (const T& v);
-	pixel<T> operator * (const T& v);
+	pixel<T> operator + (const T& v) const;
+	pixel<T> operator - (const T& v) const;
+	pixel<T> operator / (const T& v) const;
+	pixel<T> operator * (const T& v) const;
 };
 
 template<typename T>
@@ -62,6 +62,25 @@ struct image
 
 	const T& at(int32_t x, int32_t y) const;
 	T& at(int32_t x, int32_t y);
+};
+
+template<typename T>
+struct sample_recorder
+{
+	T sample_mean;
+	T sample_sq_mean;
+	long n_samples;
+
+	sample_recorder(const T& init_mean = T(), const T& init_sq_mean = T());
+	~sample_recorder();
+
+	// copy and asignment
+	sample_recorder(const sample_recorder<T>& sr);
+	const sample_recorder<T>& operator = (const sample_recorder<T>& sr);
+
+	// record sample
+	void record(const T& sample);
+	void operator() (const T& sample) { record(sample); }
 };
 
 }
