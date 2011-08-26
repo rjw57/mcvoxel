@@ -167,6 +167,7 @@ struct main_program
 	std::vector<octree::crystalised_octree>    crystal_octrees;
 	HDRLoaderResult                            sky_light_probe;
 	float                                      sky_max_lum; // for importance sampling
+	float                                      sky_integral; // for importance sampling
 
 	data::image<data::pixel<float> >           terrain_colour;
 	data::image<float>                         terrain_alpha;
@@ -205,14 +206,73 @@ struct main_program
 		return (min_dist_sq >= 0.f);
 	}
 
-	data::pixel<float> sample_sky(const Vector& v) const
+	// draw a sample from f(t,p) = sky_lum(t,p)/[\int sky_lum(t,p) dt dp] == sky_lum(t,p)/sky_norm
+	// return sky(t,p) / sky_lum;
+	data::pixel<float> sample_sky_pdf(float x, float y, float z, ray& out_ray) const
+	{
+		// we sample via rejection sampling: consider the uniform spherical PDF g(t,p) = 1/(4*pi).
+		// since we know that f(t,p) <= sky_max_lum/sky_norm, then f(t,p) <= 4*pi*sky_max_lum/sky_norm * g(t,p).
+		// and hence f(t,p) <= M g(x) for some constant M.
+		//
+		// sampling from g() is easy we may therefore use rejection sampling to sample from f
+		for(;;)
+		{
+			// sample from g()
+			sample_spherical_ray(x, y, z, &out_ray);
+
+			// calculate f * sky_norm
+			data::pixel<float> sky = sample_sky(out_ray);
+			float f = rgb2y(sky);
+
+			// accept? (u < f / (M g(x))) === (u < sky_norm * f / sky_max_lum)
+			if(uniform_real() < (f / sky_max_lum))
+			{
+				// accepted
+				return sky / f;
+			}
+		}
+	}
+
+	data::pixel<float> sample_sky(const Vector& v, float* sa = NULL) const
 	{
 		ray temp_ray;
 		make_ray(0, 0, 0, pt_vector_get_x(v), pt_vector_get_y(v), pt_vector_get_z(v), &temp_ray);
-		return sample_sky(temp_ray);
+		return sample_sky(temp_ray, sa);
 	}
 
-	data::pixel<float> sample_sky(const ray& r) const
+	static float sky_pixel_solid_angle(int x, int y, int w, int h)
+	{
+		float pix_dx = 1.f / static_cast<float>(w);
+		float pix_dy = 1.f / static_cast<float>(h);
+
+		float min_x = static_cast<float>(x) * pix_dx;
+		float min_y = static_cast<float>(y) * pix_dy;
+
+		float max_x = static_cast<float>(x+1) * pix_dx;
+		float max_y = static_cast<float>(y+1) * pix_dy;
+
+		float min_theta, min_phi;
+		normalised_texture_to_spherical(min_x, min_y, min_theta, min_phi);
+
+		float max_theta, max_phi;
+		normalised_texture_to_spherical(max_x, max_y, max_theta, max_phi);
+
+		return fabs(cos(min_theta) - cos(max_theta)) * fabs(max_phi - min_phi);
+	}
+
+	static void normalised_texture_to_spherical(float x, float y, float& r_theta, float& r_phi)
+	{
+		r_theta = y * 3.14159f;
+		r_phi = ((x * 2.f) - 1.f) * 3.14159f;
+	}
+
+	static void spherical_to_normalised_texture(float theta, float phi, float& r_x, float& r_y)
+	{
+		r_x = std::max(0.f, std::min(1.f, 0.5f * (1.f + (phi / 3.14159f))));
+		r_y = std::max(0.f, std::min(1.f, theta / 3.14159f));
+	}
+
+	data::pixel<float> sample_sky(const ray& r, float* sa = NULL) const
 	{
 #if 0
 		float c1 = fabs(r.i), c2 = fabs(r.k), c3 = r.j;
@@ -236,8 +296,13 @@ struct main_program
 		float theta = acos(r.j/m);
 		float phi = atan2(r.k, r.i);
 
-		float sky_x = std::max(0.f, std::min(1.f, 0.5f * (1.f + (phi / 3.14159f))));
-		float sky_y = std::max(0.f, std::min(1.f, theta / 3.14159f));
+		float sky_x, sky_y;
+		spherical_to_normalised_texture(theta, phi, sky_x, sky_y);
+
+		if(sa != NULL)
+		{
+			*sa = sky_pixel_solid_angle(sky_x, sky_y, sky_light_probe.width, sky_light_probe.height);
+		}
 
 		data::pixel<float> output;
 		//output.r = sky_x; output.g = sky_y; output.b = 0.f;
@@ -262,8 +327,8 @@ struct main_program
 		//float i(fx), k(fy), j(-0.5f*h);
 		float i(fx), j(fy), k(h);
 
-		float pitch = 90.f * (2.f*3.14159f/360.f);
-		float yaw = 0.f * 35.f * (2.f*3.14159f/360.f);
+		float pitch = 30.f * (2.f*3.14159f/360.f);
+		float yaw = -20.f * 35.f * (2.f*3.14159f/360.f);
 
 		float cp = cos(pitch), sp = sin(pitch);
 		float new_j = cp*j - sp*k, new_k = sp*j + cp*k;
@@ -276,9 +341,12 @@ struct main_program
 		float mag = sqrt(i*i + j*j + k*k);
 		//make_ray(107.2, 77.8f, 87.1, i/mag, j/mag, k/mag, &r);
 		//make_ray(107.2, 75.8f, 102.1, i/mag, j/mag, k/mag, &r);
-		make_ray(0, 800, 0, i/mag, j/mag, k/mag, &r);
+		//make_ray(-10, 400, 102, i/mag, j/mag, k/mag, &r);
 		//make_ray(107.2, 81.8, 102.1, i/mag, j/mag, k/mag, &r);
 		//make_ray(200.f, 107.f, -100.f, i/mag, j/mag, k/mag, &r);
+
+		make_ray(-20, 73, 122, i/mag, j/mag, k/mag, &r);
+		make_ray(-100, 130, -200, i/mag, j/mag, k/mag, &r);
 
 		// have 2 bounces of indirect illumination
 		return sample_ray(r, 2);
@@ -302,6 +370,8 @@ struct main_program
 			float nx, float ny, float nz) const
 	{
 		data::pixel<float> output;
+
+		// return data::pixel<float>(1,1,1);
 
 		// extract the fractional part of the intersection co-ord (this will be the texture)
 		float tmp, tx, ty;
@@ -449,53 +519,92 @@ struct main_program
 
 			output.r = output.g = output.b = 0.f;
 
-			// bounce samples
-			const int n_iterations = 4;
 			int samples_drawn = 0;
-			for(int iteration_idx = 0; iteration_idx < n_iterations; ++iteration_idx)
+
+			// for the sky (or, rather, it's luminosity) we want to evaluate the integral
+			// 
+			// I = \int sky(t,p) * max(0, cos((t,p) . normal)) dt dp [t == theta, p == phi]
+			// 
+			// let g1(t,p) be the spherical PDF sky(t,p)/[\int sky(t,p) dt dp] == sky(t,p)/sky_norm. then
+			//
+			// I = sky_norm \int g1(t,p) * max(0,cos((t,p) . normal)) dt dp
+			// 
+			// let g2(t,p) = max(0, cos((t,p) . normal)) / \int max(0, cos((t,p) /. normal)) dt dp = max(0, cos((t,p) . normal)) / pi
+			//
+			// then
+			//
+			// I = pi * sky_norm \int g1(t,p) * g2(t,p) dt dp where g1() and g2() are pdfs
+			//
+			// We can therefore evaluate the integral via
+			// importance sampling: viewing it as the expectation
+			// of g1 w.r.t. g2 or the expectation of g2 w.r.t. g1.
+			//
+			// We can draw samples from g2 analytically and can draw samples from g1 via rejection sampling.
+
+			// FIXME: is there some normalisation for the lambertian lighting BRDF?
+			const float lambertian_norm = 1.f; // 3.14159f;
+
+			// calculate expectation of g2 w.r.t. g1
+			for(int idx=0; idx < 1; ++idx)
 			{
-				// sample from the sky
-				for(int sky_sample_idx=0; sky_sample_idx<1; ++sky_sample_idx)
+				// dont waste the opportunity just because we end up sampling a sky ray behind us
+				float g2 = 0.f;
+				for(int tries = 0; (g2 <= 0.f) && (tries < 4); ++tries)
 				{
-					// sample a sky ray in a weighted cosine centred on the normal
-					Vector sky_ray_dir = pt_sampling_cosine(
-							pt_vector_make(normal_x, normal_y, normal_z, 0.f));
+					// sample g1
+					ray g1_ray;
+					data::pixel<float> sky_colour = sample_sky_pdf(hit_x, hit_y, hit_z, g1_ray);
 
-					ray sky_ray;
-					make_ray(hit_x, hit_y, hit_z,
-							pt_vector_get_x(sky_ray_dir),
-							pt_vector_get_y(sky_ray_dir),
-							pt_vector_get_z(sky_ray_dir),
-							&sky_ray);
-
-					data::pixel<float> sky_sample = sample_sky(sky_ray);
-
-					if(!cast_ray(sky_ray))
+					// calculate g2()
+					float g2 = g1_ray.i * normal_x + g1_ray.j * normal_y + g1_ray.k * normal_z;
+					if(g2 > 0.f)
 					{
-						output = output + (surface_colour * sky_sample * 0.5f);
+						// can we see the sky?
+						if(!cast_ray(g1_ray))
+						{
+							output = output + (surface_colour * sky_colour * g2 * lambertian_norm * sky_integral);
+						}
 					}
 					++samples_drawn;
 				}
+			}
+			
+			// calculate expectation of sky w.r.t. g2 (avoids having to divide and multiply by sky_norm)
+			for(int idx=0; idx < 1; ++idx)
+			{
+				// sample g2
+				Vector g2_ray_dir = pt_sampling_cosine(
+						pt_vector_make(normal_x, normal_y, normal_z, 0.f));
+
+				ray g2_ray;
+				make_ray(hit_x, hit_y, hit_z,
+						pt_vector_get_x(g2_ray_dir),
+						pt_vector_get_y(g2_ray_dir),
+						pt_vector_get_z(g2_ray_dir),
+						&g2_ray);
+				
+				// by default we see blackness
+				data::pixel<float> sample(0,0,0);
 
 				// we need to decide whether to recursively sample the world as well
 				if(recurse_depth > 0)
 				{
-					// sample a ray in a weighted cosine centred on the normal
-					Vector bounce_ray_dir = pt_sampling_cosine(
-							pt_vector_make(normal_x, normal_y, normal_z, 0.f));
-
-					ray bounce_ray;
-					make_ray(hit_x, hit_y, hit_z,
-							pt_vector_get_x(bounce_ray_dir),
-							pt_vector_get_y(bounce_ray_dir),
-							pt_vector_get_z(bounce_ray_dir),
-							&bounce_ray);
-
-					data::pixel<float> sample = sample_ray(bounce_ray, recurse_depth - 1);
-					output = output + (surface_colour * sample * 0.5f);
-					++samples_drawn;
+					sample = sample_ray(g2_ray, recurse_depth - 1);
 				}
+				else
+				{
+					// can we see the sky?
+					if(!cast_ray(g2_ray))
+					{
+						// calculate g1() * sky_norm
+						sample = sample_sky(g2_ray);
+					}
+				}
+
+				output = output + (surface_colour * sample * lambertian_norm);
+				++samples_drawn;
 			}
+
 			output = output / samples_drawn;
 		}
 		else
@@ -525,18 +634,23 @@ struct main_program
 		}
 
 		std::cout << "Loaded skybox size: " << sky_light_probe.width << "x" << sky_light_probe.height << std::endl;
-		// find sky max luminosity
+		// find sky spherical integral
+		double integral = 0.f;
 		sky_max_lum = 0;
-		for(int i=0; i<sky_light_probe.width*sky_light_probe.height; ++i)
+		for(int sy=0; sy<sky_light_probe.height; ++sy)
 		{
-			float *sky_pix = sky_light_probe.cols + 3 * i;
-			data::pixel<float> p;
-			p.r = sky_pix[0];
-			p.g = sky_pix[1];
-			p.b = sky_pix[2];
-			sky_max_lum = std::max(sky_max_lum, rgb2y(p));
+			for(int sx=0; sx<sky_light_probe.width; ++sx)
+			{
+				float *p_sky_pix = &(sky_light_probe.cols[3*(sx+(sy*sky_light_probe.width))]);
+				data::pixel<float> sky_pix(p_sky_pix[0], p_sky_pix[1], p_sky_pix[2]);
+				float sky_lum = rgb2y(sky_pix);
+
+				sky_max_lum = std::max(sky_max_lum, sky_lum);
+				integral += sky_pixel_solid_angle(sx, sy, sky_light_probe.width, sky_light_probe.height) * sky_lum;
+			}
 		}
-		std::cout << "Maximum luminosity: " << sky_max_lum << std::endl;
+		std::cout << "sky light probe integral: " << integral << std::endl;
+		std::cout << "sky maximum luminosity: " << sky_max_lum << std::endl;
 
 #if 0
 		mc::world world(argv[1]);
@@ -604,8 +718,8 @@ struct main_program
 			}
 		}
 
-		//const int w=850, h=480;
-		const int w=1280>>1, h=720>>1;
+		const int w=850, h=480;
+		//const int w=1280, h=720;
 		boost::shared_ptr< data::pixel<uint8_t> > pixels(new data::pixel<uint8_t>[w*h]);
 		boost::shared_ptr< data::pixel<float> > float_pixels(new data::pixel<float>[w*h]);
 		boost::shared_ptr< data::pixel<float> > float_pixels_sq(new data::pixel<float>[w*h]);
@@ -629,7 +743,7 @@ struct main_program
 			(n_samples_pixels.get())[idx] = 0;
 		}
 
-		const int32_t n_samples = 64;
+		const int32_t n_samples = 128;
 		for(int32_t sample_idx=0; sample_idx<n_samples; ++sample_idx)
 		{
 			std::cout << "pass " << sample_idx+1 << "/" << n_samples << std::endl;
