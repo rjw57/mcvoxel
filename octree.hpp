@@ -32,6 +32,7 @@ struct branch_node
 	typedef branch_node<T> branch_node_t;
 	typedef boost::variant< T, boost::recursive_wrapper< branch_node_t > > branch_or_leaf_node_t;
 	branch_or_leaf_node_t children[8];
+	branch_or_leaf_node_t dummy; // required with GCC 4.6.0 FSR
 
 	// branch nodes must be given a default value.
 	branch_node(const T& default_value = T());
