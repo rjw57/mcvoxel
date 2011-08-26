@@ -262,8 +262,8 @@ struct main_program
 		//float i(fx), k(fy), j(-0.5f*h);
 		float i(fx), j(fy), k(h);
 
-		float pitch = 15.f * (2.f*3.14159f/360.f);
-		float yaw = 35.f * (2.f*3.14159f/360.f);
+		float pitch = 90.f * (2.f*3.14159f/360.f);
+		float yaw = 0.f * 35.f * (2.f*3.14159f/360.f);
 
 		float cp = cos(pitch), sp = sin(pitch);
 		float new_j = cp*j - sp*k, new_k = sp*j + cp*k;
@@ -276,9 +276,9 @@ struct main_program
 		float mag = sqrt(i*i + j*j + k*k);
 		//make_ray(107.2, 77.8f, 87.1, i/mag, j/mag, k/mag, &r);
 		//make_ray(107.2, 75.8f, 102.1, i/mag, j/mag, k/mag, &r);
-		//make_ray(0, 800, 0, i/mag, j/mag, k/mag, &r);
+		make_ray(0, 800, 0, i/mag, j/mag, k/mag, &r);
 		//make_ray(107.2, 81.8, 102.1, i/mag, j/mag, k/mag, &r);
-		make_ray(200.f, 107.f, -100.f, i/mag, j/mag, k/mag, &r);
+		//make_ray(200.f, 107.f, -100.f, i/mag, j/mag, k/mag, &r);
 
 		// have 2 bounces of indirect illumination
 		return sample_ray(r, 2);
@@ -554,7 +554,7 @@ struct main_program
 			std::cout << " - " << level_coords.size() << " level coords." << std::endl;
 
 			mc::utils::level_coord rc = mc::utils::path_to_region_coord(region->get_path());
-			octree::location start_coord = octree::location(rc.get_x() * 8, 0, rc.get_z() * 8);
+			octree::location start_coord = octree::location(rc.get_x() * 16, 0, rc.get_z() * 16);
 
 			octree::octree<data::block> loaded_tree(9, start_coord, mc::Air);
 			std::for_each(level_coords.begin(), level_coords.end(), load_level(region, loaded_tree));
