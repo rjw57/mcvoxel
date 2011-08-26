@@ -470,9 +470,10 @@ void crystalised_octree::assign_from(const octree<T>& ot)
 }
 
 // this is used by crystalised_octree::ray_intersect. Looking forward to C++11's lambdas yet?
+// we use >= because we want to sort in the order we push onto the stack (i.e. farthest first)
 inline bool record_cmp_(const boost::tuple<extent, size_t, float>& a, const boost::tuple<extent, size_t, float>& b)
 {
-	return boost::get<2>(a) < boost::get<2>(b);
+	return boost::get<2>(a) >= boost::get<2>(b);
 }
 
 template<typename T>
@@ -502,18 +503,18 @@ bool crystalised_octree::ray_intersect(const ray& eye_ray_, sub_location& out_su
 	node_record stack[log_2_size_ << 3]; int stack_top = 0; //< where to insert the next node
 	stack[stack_top++] = node_record(extent_(), 0, distance);
 
-	node_record intersections[8];
-
 	while(stack_top > 0)
 	{
 		// pop the top-most record from the stack
-		const node_record& record = stack[--stack_top];
+		const node_record record = stack[--stack_top];
 
 		const extent& node_ext = boost::get<0>(record);
 		size_t node_idx = boost::get<1>(record);
 
 		if(is_branch(node_idx))
 		{
+			// we'll store child intersections on the stack
+			node_record* intersections = stack + stack_top;
 			size_t n_intersections = 0;
 
 			// iterate over all children
@@ -567,12 +568,9 @@ bool crystalised_octree::ray_intersect(const ray& eye_ray_, sub_location& out_su
 			// sort children by intersection distance
 			std::sort(intersections, intersections + n_intersections, record_cmp_);
 
-			// try to intersect recursively, push farthest first
-			for(size_t i=0; i<n_intersections; ++i)
-			{
-				assert(stack_top < (log_2_size_ << 3));
-				stack[stack_top++] = intersections[n_intersections-1-i];
-			}
+			// update stack pointer
+			stack_top += n_intersections;
+			assert(stack_top <= (log_2_size_ << 3));
 		}
 		else
 		{
