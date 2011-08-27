@@ -541,8 +541,8 @@ bool crystalised_octree::ray_intersect(const ray& eye_ray_, sub_location& out_su
 				// optimisation: if this child is a leaf node and is transparent, skip it
 				if(!is_branch(saved_child_idx))
 				{
-					//if(node_ext.contains(eye_ray_origin))
-					//	continue;
+					if(child_ext.contains(eye_ray_origin))
+						continue;
 
 					T child_data(static_cast<int32_t>(data_->at(saved_child_idx)));
 
