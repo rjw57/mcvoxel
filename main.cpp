@@ -185,6 +185,47 @@ struct main_program
 
 	bool cast_ray(const ray& r, octree::sub_location& out_sub_loc, data::block& out_block) const
 	{
+		ray cont_ray(r);
+
+		while(cast_ray_raw(cont_ray, out_sub_loc, out_block))
+		{
+			// we hit something, is it transparent?
+			if((out_block.id != mc::Torch) && (out_block.id != mc::Water) && (out_block.id != mc::StationaryWater) && (out_block.id != mc::Glass))
+				return true;
+
+			// handle transparent blocks
+
+			float hit_x = out_sub_loc.coords[0];
+			float hit_y = out_sub_loc.coords[1];
+			float hit_z = out_sub_loc.coords[2];
+			const octree::extent& node_ext = out_sub_loc.node_extent;
+
+			// work out where the ray emerges
+			ray emerge_ray;
+			make_ray(hit_x+cont_ray.i*node_ext.size*4.f, hit_y+cont_ray.j*node_ext.size*4.f, hit_z+cont_ray.k*node_ext.size*4.f,
+					cont_ray.i, cont_ray.j, cont_ray.k, &emerge_ray);
+
+			aabox node_box(node_ext.make_aabox());
+
+			float emerge_distance = 0.f;
+			if(!slopeint_mul(&emerge_ray, &node_box, &emerge_distance))
+			{
+				// we didn't hit, this is usually due to hitting just on a corner/edge, just nudge us slightly...
+				emerge_distance = 1e-2f;
+			}
+
+			float emerge_x = hit_x + cont_ray.i*emerge_distance;
+			float emerge_y = hit_y + cont_ray.j*emerge_distance;
+			float emerge_z = hit_z + cont_ray.k*emerge_distance;
+
+			make_ray(emerge_x, emerge_y, emerge_z, cont_ray.i, cont_ray.j, cont_ray.k, &cont_ray);
+		}
+
+		return false;
+	}
+
+	bool cast_ray_raw(const ray& r, octree::sub_location& out_sub_loc, data::block& out_block) const
+	{
 		float min_dist_sq = -1.f;
 
 		BOOST_FOREACH(const octree::crystalised_octree& tree, crystal_octrees)
