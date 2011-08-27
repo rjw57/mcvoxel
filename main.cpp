@@ -176,16 +176,17 @@ struct main_program
 	typedef data::pixel<float> pixel_f32;
 	typedef data::sample_recorder<pixel_f32> sample_recorder;
 
-	bool cast_ray(const ray& r) const
+	bool cast_ray(const ray& r, pixel_f32& transmission) const
 	{
 		octree::sub_location temp_sub_loc;
 		data::block temp_hit_block;
-		return cast_ray(r, temp_sub_loc, temp_hit_block);
+		return cast_ray(r, temp_sub_loc, temp_hit_block, transmission);
 	}
 
-	bool cast_ray(const ray& r, octree::sub_location& out_sub_loc, data::block& out_block) const
+	bool cast_ray(const ray& r, octree::sub_location& out_sub_loc, data::block& out_block, pixel_f32& transmission) const
 	{
 		ray cont_ray(r);
+		transmission = pixel_f32(1,1,1);
 
 		while(cast_ray_raw(cont_ray, out_sub_loc, out_block))
 		{
@@ -203,22 +204,47 @@ struct main_program
 			// work out where the ray emerges
 			ray emerge_ray;
 			make_ray(hit_x+cont_ray.i*node_ext.size*4.f, hit_y+cont_ray.j*node_ext.size*4.f, hit_z+cont_ray.k*node_ext.size*4.f,
-					cont_ray.i, cont_ray.j, cont_ray.k, &emerge_ray);
-
+					-cont_ray.i, -cont_ray.j, -cont_ray.k, &emerge_ray);
 			aabox node_box(node_ext.make_aabox());
 
 			float emerge_distance = 0.f;
+			const float epsilon = 1e-2f;
+
 			if(!slopeint_mul(&emerge_ray, &node_box, &emerge_distance))
 			{
 				// we didn't hit, this is usually due to hitting just on a corner/edge, just nudge us slightly...
-				emerge_distance = 1e-2f;
+				emerge_distance = epsilon;
+				std::cout << '.' << std::flush;
+
+				make_ray(hit_x+epsilon*cont_ray.i, hit_y+epsilon*cont_ray.j, hit_z+epsilon*cont_ray.k,
+						cont_ray.i, cont_ray.j, cont_ray.k, &cont_ray);
 			}
+			else
+			{
+				float emerge_x = emerge_ray.x + emerge_ray.i*emerge_distance;
+				float emerge_y = emerge_ray.y + emerge_ray.j*emerge_distance;
+				float emerge_z = emerge_ray.z + emerge_ray.k*emerge_distance;
 
-			float emerge_x = hit_x + cont_ray.i*emerge_distance;
-			float emerge_y = hit_y + cont_ray.j*emerge_distance;
-			float emerge_z = hit_z + cont_ray.k*emerge_distance;
+				make_ray(emerge_x-epsilon*cont_ray.i, emerge_y-epsilon*cont_ray.j, emerge_z-epsilon*cont_ray.k,
+						cont_ray.i, cont_ray.j, cont_ray.k, &emerge_ray);
 
-			make_ray(emerge_x, emerge_y, emerge_z, cont_ray.i, cont_ray.j, cont_ray.k, &cont_ray);
+				float dx = emerge_ray.x - hit_x;
+				float dy = emerge_ray.y - hit_y;
+				float dz = emerge_ray.z - hit_z;
+				emerge_distance = sqrt(dx*dx + dy*dy + dz*dz);
+
+				cont_ray = emerge_ray;
+			}
+			
+			make_ray(hit_x+epsilon*cont_ray.i, hit_y+epsilon*cont_ray.j, hit_z+epsilon*cont_ray.k,
+					cont_ray.i, cont_ray.j, cont_ray.k, &cont_ray);
+			//make_ray(hit_x, hit_y, hit_z, cont_ray.i, cont_ray.j, cont_ray.k, &cont_ray);
+
+			if((out_block.id == mc::Water) || (out_block.id == mc::StationaryWater))
+			{
+				pixel_f32 block_t(powf(0.8, emerge_distance), powf(0.9, emerge_distance), powf(0.95, emerge_distance));
+				transmission = transmission * block_t;
+			}
 		}
 
 		return false;
@@ -509,17 +535,21 @@ struct main_program
 		return output;
 	}
 
-	void sample_ray(sample_recorder& record, ray& r, int recurse_depth, const pixel_f32& sample_filter = pixel_f32(1,1,1)) const
+	void sample_ray(sample_recorder& record, ray& r, int recurse_depth, const pixel_f32& sample_filter_ = pixel_f32(1,1,1)) const
 	{
 		octree::sub_location node_sub_loc;
 		data::block hit_block;
+		pixel_f32 ray_transmission;
 
-		if(!cast_ray(r, node_sub_loc, hit_block))
+		if(!cast_ray(r, node_sub_loc, hit_block, ray_transmission))
 		{
 			// we didn't hit the world, sample the sky
-			record(sample_filter * sample_sky(r));
+			record(sample_filter_ * ray_transmission * sample_sky(r));
 			return;
 		}
+
+		// update the sample filter with the tranmission of this ray
+		pixel_f32 sample_filter = sample_filter_ * ray_transmission;
 
 		const octree::extent& node_ext = node_sub_loc.node_extent;
 
@@ -626,9 +656,10 @@ struct main_program
 			if(g2 > 0.f)
 			{
 				// can we see the sky?
-				if(!cast_ray(g1_ray))
+				pixel_f32 to_sky_transmission;
+				if(!cast_ray(g1_ray, to_sky_transmission))
 				{
-					sky_sample = sky_colour * g2 * sky_integral;
+					sky_sample = sky_colour * g2 * sky_integral * to_sky_transmission;
 				}
 			}
 
@@ -662,7 +693,8 @@ struct main_program
 			data::pixel<float> sample(0,0,0);
 
 			// can we see the sky?
-			if(!cast_ray(g2_ray))
+			pixel_f32 to_sky_transmission;
+			if(!cast_ray(g2_ray, to_sky_transmission))
 			{
 				// calculate g1() * sky_norm
 				sample = sample_sky(g2_ray);
