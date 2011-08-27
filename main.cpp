@@ -333,8 +333,8 @@ struct main_program
 		//float i(fx), k(fy), j(-0.5f*h);
 		float i(-fx), j(fy), k(h);
 
-		float pitch = 90.f * (2.f*3.14159f/360.f);
-		float yaw = 20.f * (2.f*3.14159f/360.f);
+		float pitch = 20.f * (2.f*3.14159f/360.f);
+		float yaw = -10.f * (2.f*3.14159f/360.f);
 
 		float cp = cos(pitch), sp = sin(pitch);
 		float new_j = cp*j - sp*k, new_k = sp*j + cp*k;
@@ -351,9 +351,9 @@ struct main_program
 		//make_ray(107.2, 81.8, 102.1, i/mag, j/mag, k/mag, &r);
 		//make_ray(200.f, 107.f, -100.f, i/mag, j/mag, k/mag, &r);
 
-		make_ray(-20, 73, 122, i/mag, j/mag, k/mag, &r);
+		//make_ray(-20, 73, 122, i/mag, j/mag, k/mag, &r);
 		make_ray(-100, 130, -200, i/mag, j/mag, k/mag, &r);
-		make_ray(-100, 500, -100, i/mag, j/mag, k/mag, &r);
+		//make_ray(-100, 500, -100, i/mag, j/mag, k/mag, &r);
 
 		// have 2 bounces of indirect illumination
 		sample_ray(record, r, 1);
@@ -468,7 +468,7 @@ struct main_program
 		return output;
 	}
 
-	void sample_ray(sample_recorder& record, ray& r, int recurse_depth) const
+	void sample_ray(sample_recorder& record, ray& r, int recurse_depth, const pixel_f32& sample_filter = pixel_f32(1,1,1)) const
 	{
 		octree::sub_location node_sub_loc;
 		data::block hit_block;
@@ -476,7 +476,7 @@ struct main_program
 		if(!cast_ray(r, node_sub_loc, hit_block))
 		{
 			// we didn't hit the world, sample the sky
-			record(sample_sky(r));
+			record(sample_filter * sample_sky(r));
 			return;
 		}
 
@@ -533,12 +533,12 @@ struct main_program
 		switch(hit_block.id)
 		{
 			case mc::Torch:
-				record(data::pixel<float>(1,1,1) * glow_scale);
+				record(sample_filter * data::pixel<float>(1,1,1) * glow_scale);
 				return; break;
 
 			case mc::Lava:
 			case mc::StationaryLava:
-				record(data::pixel<float>(0.25,0.1,0.01) * glow_scale);
+				record(sample_filter * data::pixel<float>(0.25,0.1,0.01) * glow_scale);
 				return; break;
 		}
 
@@ -592,7 +592,7 @@ struct main_program
 			}
 
 			// record the sky sample (including black samples)
-			record(sky_sample * surface_colour * lambertian_norm);
+			record(sample_filter * sky_sample * surface_colour * lambertian_norm);
 		}
 		
 		// calculate expectation of sky w.r.t. g2 (avoids having to divide and multiply by sky_norm)
@@ -611,13 +611,9 @@ struct main_program
 		// we need to decide whether to recursively sample the world as well
 		if(recurse_depth > 0)
 		{
-			sample_recorder temp_recorder;
-			sample_ray(temp_recorder, g2_ray, recurse_depth - 1);
-
-			for(int i=0; i<temp_recorder.n_samples; ++i)
-			{
-				record(temp_recorder.sample_mean * surface_colour * lambertian_norm);
-			}
+			// FIXME: Think about this... is it biasing the result?
+			pixel_f32 new_filter = sample_filter * surface_colour * lambertian_norm;
+			sample_ray(record, g2_ray, recurse_depth - 1, new_filter);
 		}
 		else
 		{
@@ -631,7 +627,7 @@ struct main_program
 				sample = sample_sky(g2_ray);
 			}
 
-			record(sample * surface_colour * lambertian_norm);
+			record(sample_filter * sample * surface_colour * lambertian_norm);
 		}
 	}
 
