@@ -95,8 +95,15 @@ T rgb2y(const data::pixel<T>& p)
 
 template<typename T>
 image<T>::image()
-	: width(0), height(0), pixels()
-{ }
+{
+	reset();
+}
+
+template<typename T>
+image<T>::image(int w, int h)
+{
+	resize(w, h);
+}
 
 template<typename T>
 image<T>::image(const image& im)
@@ -109,6 +116,21 @@ const image<T>& image<T>::operator = (const image<T>& im)
 	width = im.width;
 	height = im.height;
 	pixels = im.pixels;
+}
+
+template<typename T>
+void image<T>::resize(int w, int h)
+{
+	assert((w >= 0) && (h >= 0));
+	width = w; height = h;
+	pixels.resize(w*h);
+}
+
+template<typename T>
+void image<T>::reset()
+{
+	width = height = 0;
+	pixels.clear();
 }
 
 template<typename T>
@@ -145,6 +167,7 @@ const sample_recorder<T>& sample_recorder<T>::operator = (const sample_recorder<
 	sample_mean = sr.sample_mean;
 	sample_sq_mean = sr.sample_sq_mean;
 	n_samples = sr.n_samples;
+	return *this;
 }
 
 template<typename T>

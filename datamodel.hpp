@@ -60,8 +60,12 @@ struct image
 	std::vector<T> pixels;
 
 	image();
+	image(int w, int h);
 	image(const image& im);
 	const image<T>& operator = (const image<T>& im);
+
+	void resize(int w, int h);
+	void reset();
 
 	const T& at(int32_t x, int32_t y) const;
 	T& at(int32_t x, int32_t y);
