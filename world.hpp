@@ -17,7 +17,8 @@ void load_cached_world(std::istream& is, world& w);
 
 // cast a ray into the world. If we hit a non-air block, return true and set out_sub_loc and out_block as
 // appropriate
-bool cast_ray(const world& w, const ray& r, octree::sub_location& out_sub_loc, data::block& out_block);
+bool cast_ray(const world& w, const ray& r, octree::sub_location& out_sub_loc, data::block& out_block,
+		float& nx, float& ny, float &nz);
 
 // as above, but don't return position
 bool cast_ray(const world& w, const ray& r);

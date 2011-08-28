@@ -1,4 +1,5 @@
 #include <algorithm>
+#include <cmath>
 #include <functional>
 #include <iostream>
 #include <boost/foreach.hpp>
@@ -137,10 +138,12 @@ bool cast_ray(const world& w, const ray& r)
 {
 	octree::sub_location dummy_loc;
 	data::block dummy_block;
-	return cast_ray(w, r, dummy_loc, dummy_block);
+	float nx, ny, nz;
+	return cast_ray(w, r, dummy_loc, dummy_block, nx, ny, nz);
 }
 
-bool cast_ray(const world& w, const ray& r, octree::sub_location& out_sub_loc, data::block& out_block)
+bool cast_ray(const world& w, const ray& r, octree::sub_location& out_sub_loc, data::block& out_block,
+		float& normal_x, float& normal_y, float &normal_z)
 {
 	float min_dist_sq = -1.f;
 
@@ -164,7 +167,50 @@ bool cast_ray(const world& w, const ray& r, octree::sub_location& out_sub_loc, d
 		}
 	}
 
-	return (min_dist_sq >= 0.f);
+	if(min_dist_sq < 0.f)
+		return false;
+
+	const octree::extent& node_ext(out_sub_loc.node_extent);
+
+	float mid_x = static_cast<float>(node_ext.loc.x) + 0.5f * static_cast<float>(node_ext.size);
+	float mid_y = static_cast<float>(node_ext.loc.y) + 0.5f * static_cast<float>(node_ext.size);
+	float mid_z = static_cast<float>(node_ext.loc.z) + 0.5f * static_cast<float>(node_ext.size);
+
+	float hit_x = out_sub_loc.coords[0];
+	float hit_y = out_sub_loc.coords[1];
+	float hit_z = out_sub_loc.coords[2];
+
+	normal_x = hit_x - mid_x;
+	normal_y = hit_y - mid_y;
+	normal_z = hit_z - mid_z;
+
+	// convert the spherical normal into a cubical one...
+	float abs_x = fabs(normal_x), abs_y = fabs(normal_y), abs_z = fabs(normal_z);
+
+	if((abs_x > abs_y) && (abs_x > abs_z))
+	{
+		normal_x = normal_x > 0.f ? 1.f : -1.f;
+		normal_y = normal_z = 0.f;
+	}
+	else if((abs_y > abs_x) && (abs_y > abs_z))
+	{
+		normal_y = normal_y > 0.f ? 1.f : -1.f;
+		normal_x = normal_z = 0.f;
+	}
+	else if((abs_z > abs_x) && (abs_z > abs_y))
+	{
+		normal_z = normal_z > 0.f ? 1.f : -1.f;
+		normal_x = normal_y = 0.f;
+	}
+	else
+	{
+		float mag_normal = sqrt(normal_x*normal_x + normal_y*normal_y + normal_z*normal_z);
+		normal_x /= mag_normal;
+		normal_y /= mag_normal;
+		normal_z /= mag_normal;
+	}
+
+	return true;
 }
 
 }

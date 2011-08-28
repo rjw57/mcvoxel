@@ -1,4 +1,6 @@
 #include <cmath>
+#include <iterator>
+#include <deque>
 #include <boost/random/mersenne_twister.hpp>
 #include <boost/random/uniform_real.hpp>
 #include <boost/random/variate_generator.hpp>
@@ -43,10 +45,13 @@ void scene::draw()
 	ray eye_ray;
 	make_eye_ray(current_x_, current_y_, eye_ray);
 
+	std::deque<world_position> eye_path;
+	trace_ray(eye_ray, 7, std::back_inserter(eye_path));
+
 	pixel_f32 sample(0,0,0);
-	if(world::cast_ray(world, eye_ray))
+	if(eye_path.size() > 0)
 	{
-		sample = pixel_f32(1,1,1);
+		sample = pixel_f32(1,1,1) * eye_path.size() / 7.f;
 	}
 
 	samples_.at(floor(current_x_), floor(current_y_)).record(sample);

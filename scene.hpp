@@ -15,9 +15,11 @@ namespace scene
 
 struct world_position
 {
-	Vector           position;
-	octree::location node_loc;
+	float            pos_x, pos_y, pos_z;
+	float            norm_x, norm_y, norm_z;
+
 	octree::extent   node_ext;
+	data::block      node_block;
 };
 
 class scene : public boost::noncopyable
@@ -68,8 +70,17 @@ class scene : public boost::noncopyable
 
 		// convert an image plane co-ordinate into an eye ray
 		void make_eye_ray(float x, float y, ray& out_ray) const;
+
+		// trace a ray through the world for a maximum of max_bounces
+		// add a world_position to out for every bounce
+		template<typename OutputIterator>
+		void trace_ray(ray& r, int max_bounces, OutputIterator out);
 };
 
 }
+
+#define INSIDE_SCENE_HPP
+#include "scene.tcc"
+#undef INSIDE_SCENE_HPP
 
 #endif // SCENE_HPP
