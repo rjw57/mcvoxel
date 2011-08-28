@@ -153,9 +153,20 @@ struct main
 		samples.resize(848, 480);
 
 		try {
-			write_output();
+			const off_t n_passes = 64;
+			for(off_t pass_idx = 0; pass_idx < n_passes; ++pass_idx)
+			{
+				std::cout << "pass " << pass_idx + 1 << "/" << n_passes << std::endl;
+
+				for(off_t sample_idx=0; sample_idx<samples.width*samples.height; ++sample_idx)
+				{
+					scene.draw(samples);
+				}
+
+				write_output();
+			}
 		} catch (const std::exception& e) {
-			error(1, 0, "error: failed write output: %s", e.what());
+			error(1, 0, "error: %s", e.what());
 		}
 
 		return 0;

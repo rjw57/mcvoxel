@@ -58,6 +58,7 @@ add_executable(voxel
 	io.cpp
 	main.cpp
 	octree.cpp
+	scene.cpp
 	sky.cpp
 	world.cpp
 )
