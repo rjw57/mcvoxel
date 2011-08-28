@@ -11,7 +11,7 @@ if(OPENMP_FOUND)
 endif(OPENMP_FOUND)
 
 # We need to boost libraries.
-find_package(Boost REQUIRED COMPONENTS filesystem iostreams system)
+find_package(Boost REQUIRED COMPONENTS filesystem iostreams system program_options)
 include_directories(${Boost_INCLUDE_DIR})
 link_directories(${Boost_LIBRARY_DIRS})
 
@@ -58,6 +58,7 @@ add_executable(voxel
 	io.cpp
 	main.cpp
 	octree.cpp
+	world.cpp
 )
 
 # Fast Ray/Axis-Aligned Bounding Box Overlap Tests using Ray Slopes
@@ -72,6 +73,7 @@ add_library(rayslope
 
 target_link_libraries(voxel
 	c10t-mc c10t-image rayslope hdrloader util
-	${Boost_FILESYSTEM_LIBRARY} ${Boost_SYSTEM_LIBRARY} ${Boost_IOSTREAMS_LIBRARY}
+	${Boost_FILESYSTEM_LIBRARY} ${Boost_SYSTEM_LIBRARY}
+	${Boost_IOSTREAMS_LIBRARY} ${Boost_PROGRAM_OPTIONS_LIBRARY}
 	${ZLIB_LIBRARY} ${GLIB_LIBRARIES} ${GTHREAD_LIBRARIES} ${PNG_LIBRARIES}
 )
