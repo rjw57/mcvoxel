@@ -35,9 +35,6 @@ struct main
 	// the scene we want to render
 	scene::scene scene;
 
-	// the image
-	data::image<sample_recorder> samples;
-
 	main(int argc, char** argv)
 		: argc(argc), argv(argv)
 	{ }
@@ -76,6 +73,8 @@ struct main
 			throw std::runtime_error("no output stem specified.");
 
 		std::string out_stem(options["output"].as<std::string>());
+
+		const scene::scene::image& samples(scene.samples());
 
 		int w(samples.width), h(samples.height);
 
@@ -150,24 +149,28 @@ struct main
 		}
 
 		// set output size and initialise the scene
-		samples.resize(848, 480);
-		scene.initialise(samples);
+		scene.initialise(848, 480);
+		scene.set_camera(0, 67, 0, 0, 0);
 
-		try {
-
+		try
+		{
 			const off_t n_passes = options["num-passes"].as<int>();
+			const off_t n_samples_per_pass = scene.samples().width * scene.samples().height;
+
 			for(off_t pass_idx = 0; pass_idx < n_passes; ++pass_idx)
 			{
 				std::cout << "pass " << pass_idx + 1 << "/" << n_passes << std::endl;
 
-				for(off_t sample_idx=0; sample_idx<samples.width*samples.height; ++sample_idx)
+				for(off_t sample_idx=0; sample_idx < n_samples_per_pass; ++sample_idx)
 				{
-					scene.draw(samples);
+					scene.draw();
 				}
 
 				write_output();
 			}
-		} catch (const std::exception& e) {
+		}
+		catch (const std::exception& e)
+		{
 			error(1, 0, "error: %s", e.what());
 		}
 
