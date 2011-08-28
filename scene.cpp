@@ -43,7 +43,13 @@ void scene::draw()
 	ray eye_ray;
 	make_eye_ray(current_x_, current_y_, eye_ray);
 
-	samples_.at(floor(current_x_), floor(current_y_)).record(pixel_f32(eye_ray.i, eye_ray.j, eye_ray.k));
+	pixel_f32 sample(0,0,0);
+	if(world::cast_ray(world, eye_ray))
+	{
+		sample = pixel_f32(1,1,1);
+	}
+
+	samples_.at(floor(current_x_), floor(current_y_)).record(sample);
 }
 
 void scene::peturb_image_loc(float x, float y, float& new_x, float& new_y) const

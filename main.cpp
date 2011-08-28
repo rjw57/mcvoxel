@@ -150,7 +150,7 @@ struct main
 
 		// set output size and initialise the scene
 		scene.initialise(848, 480);
-		scene.set_camera(0, 67, 0, 0, 0);
+		scene.set_camera(0, 1500, 0, 0, 90);
 
 		try
 		{

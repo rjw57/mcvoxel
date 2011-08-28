@@ -133,4 +133,38 @@ void load_cached_world(std::istream& is, world& w)
 	}
 }
 
+bool cast_ray(const world& w, const ray& r)
+{
+	octree::sub_location dummy_loc;
+	data::block dummy_block;
+	return cast_ray(w, r, dummy_loc, dummy_block);
+}
+
+bool cast_ray(const world& w, const ray& r, octree::sub_location& out_sub_loc, data::block& out_block)
+{
+	float min_dist_sq = -1.f;
+
+	BOOST_FOREACH(const octree::crystalised_octree& tree, w)
+	{
+		octree::sub_location temp_sub_loc;
+
+		if(!tree.ray_intersect<data::block>(r, temp_sub_loc))
+			continue;
+
+		float dx = (temp_sub_loc.coords[0] - r.x);
+		float dy = (temp_sub_loc.coords[1] - r.y);
+		float dz = (temp_sub_loc.coords[2] - r.z);
+		float dist_sq = dx*dx + dy*dy + dz*dz;
+
+		if((min_dist_sq < 0.f) || (dist_sq < min_dist_sq))
+		{
+			min_dist_sq = dist_sq;
+			out_sub_loc = temp_sub_loc;
+			out_block = data::block(tree.get(temp_sub_loc.node_extent.loc));
+		}
+	}
+
+	return (min_dist_sq >= 0.f);
+}
+
 }
