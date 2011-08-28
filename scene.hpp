@@ -36,6 +36,12 @@ class scene : public boost::noncopyable
 
 		// current image plane co-ordinate
 		float current_x_, current_y_;
+
+		// image plane peturbation parameters
+		float r1_, r2_, log_r2_over_r1_;
+
+		// choose a new image location, given the existing one
+		void peturb_image_loc(float x, float y, const scene::image& im, float& new_x, float& new_y);
 };
 
 }
