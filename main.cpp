@@ -8,6 +8,7 @@
 #include <stdexcept>
 #include <boost/program_options.hpp>
 
+#include "scene.hpp"
 #include "sky.hpp"
 #include "world.hpp"
 
@@ -31,11 +32,8 @@ struct main
 	// description of the command line options
 	po::options_description cmdline_opts;
 
-	// the world we loaded
-	world::world world;
-
-	// our sky dome
-	sky::sky sky;
+	// the scene we want to render
+	scene::scene scene;
 
 	// the image
 	data::image<sample_recorder> samples;
@@ -52,19 +50,19 @@ struct main
 	{
 		if(options.count("world"))
 		{
-			world::load_world(options["world"].as<std::string>().c_str(), world);
+			world::load_world(options["world"].as<std::string>().c_str(), scene.world);
 
 			// save a cache if we were asked to
 			if(options.count("cached-world"))
 			{
 				std::ofstream output(options["cached-world"].as<std::string>().c_str());
-				world::save_cached_world(output, world);
+				world::save_cached_world(output, scene.world);
 			}
 		}
 		else if(options.count("cached-world"))
 		{
 			std::ifstream input(options["cached-world"].as<std::string>().c_str());
-			world::load_cached_world(input, world);
+			world::load_cached_world(input, scene.world);
 		}
 		else
 		{
@@ -83,7 +81,7 @@ struct main
 
 		// rationale: a uniformly bright sky (with integral 4*pi) will result in a lambertian surface
 		// having brightness pi => want to scale brightness by 1/pi == 4/integral
-		float lum_scale = 4.f / sky.lum_integral();
+		float lum_scale = 4.f / scene.sky.lum_integral();
 		data::image<pixel_u8> tone_mapped(samples.width, samples.height);
 		for(int32_t idx=0; idx<w*h; ++idx)
 		{
@@ -134,15 +132,15 @@ struct main
 		try {
 			if(options.count("sky"))
 			{
-				sky.load_hdr(options["sky"].as<std::string>().c_str());
+				scene.sky.load_hdr(options["sky"].as<std::string>().c_str());
 			}
 		} catch (const std::exception& e) {
 			error(1, 0, "error: failed to load sky dome: %s", e.what());
 		}
 
 		// FIXME: some debug output
-		std::cout << "sky light probe integral: " << sky.lum_integral() << std::endl;
-		std::cout << "sky maximum luminosity: " << sky.max_lum() << std::endl;
+		std::cout << "sky light probe integral: " << scene.sky.lum_integral() << std::endl;
+		std::cout << "sky maximum luminosity: " << scene.sky.max_lum() << std::endl;
 
 		// try to load the world
 		try {
