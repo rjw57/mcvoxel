@@ -149,11 +149,13 @@ struct main
 			error(1, 0, "error: failed to load world: %s", e.what());
 		}
 
-		// set output size
+		// set output size and initialise the scene
 		samples.resize(848, 480);
+		scene.initialise(samples);
 
 		try {
-			const off_t n_passes = 64;
+
+			const off_t n_passes = options["num-passes"].as<int>();
 			for(off_t pass_idx = 0; pass_idx < n_passes; ++pass_idx)
 			{
 				std::cout << "pass " << pass_idx + 1 << "/" << n_passes << std::endl;
@@ -179,6 +181,7 @@ struct main
 		generic.add_options()
 			("help,h", "print a brief usage summary")
 			("output,o", po::value<std::string>(), "write output to files whose name begin with arg")
+			("num-passes,n", po::value<int>()->default_value(64), "number of passes (default 64)")
 		;
 		cmdline_opts.add(generic);
 

@@ -10,20 +10,32 @@
 namespace scene
 {
 
-struct scene : public boost::noncopyable
+class scene : public boost::noncopyable
 {
-	typedef data::pixel<float>               pixel_f32;
-	typedef data::sample_recorder<pixel_f32> sample_recorder;
-	typedef data::image<sample_recorder>     image;
+	public:
+		typedef data::pixel<float>               pixel_f32;
+		typedef data::sample_recorder<pixel_f32> sample_recorder;
+		typedef data::image<sample_recorder>     image;
 
-	// the world we loaded
-	world::world world;
+		// the world we loaded
+		world::world world;
 
-	// our sky dome
-	sky::sky sky;
+		// our sky dome
+		sky::sky sky;
 
-	// draw a sample
-	void draw(image& im);
+		scene();
+		~scene();
+
+		// initialise chains for sampling into image
+		void initialise(image& im);
+
+		// draw a sample
+		void draw(image& im);
+
+	protected:
+
+		// current image plane co-ordinate
+		float current_x_, current_y_;
 };
 
 }
