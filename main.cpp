@@ -6,6 +6,7 @@
 #include <stdexcept>
 #include <boost/program_options.hpp>
 
+#include "sky.hpp"
 #include "world.hpp"
 
 namespace voxel
@@ -26,6 +27,9 @@ struct main
 
 	// the world we loaded
 	world::world world;
+
+	// our sky dome
+	sky::sky sky;
 
 	main(int argc, char** argv)
 		: argc(argc), argv(argv)
@@ -74,6 +78,20 @@ struct main
 			return 0;
 		}
 
+		// try to load the sky
+		try {
+			if(options.count("sky"))
+			{
+				sky.load_hdr(options["sky"].as<std::string>().c_str());
+			}
+		} catch (const std::exception& e) {
+			error(1, 0, "error: failed to load sky dome: %s", e.what());
+		}
+
+		// FIXME: some debug output
+		std::cout << "sky light probe integral: " << sky.lum_integral() << std::endl;
+		std::cout << "sky maximum luminosity: " << sky.max_lum() << std::endl;
+
 		// try to load the world
 		try {
 			world_io();
@@ -99,6 +117,12 @@ struct main
 			("cached-world,c", po::value<std::string>(), "save/load cached world")
 		;
 		cmdline_opts.add(world);
+
+		po::options_description scene("Scene description options");
+		scene.add_options()
+			("sky,s", po::value<std::string>(), "load HDR sky probe image")
+		;
+		cmdline_opts.add(scene);
 
 		// parse command line
 		po::store(po::command_line_parser(argc, argv).

@@ -51,6 +51,9 @@ struct pixel
 };
 
 template<typename T>
+T rgb2y(const data::pixel<T>& p);
+
+template<typename T>
 struct image
 {
 	int32_t        width, height;

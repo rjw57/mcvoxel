@@ -86,6 +86,14 @@ pixel<T> pixel<T>::operator * (const T& v) const
 }
 
 template<typename T>
+T rgb2y(const data::pixel<T>& p)
+{
+	return 0.299f*p.r + 0.114f*p.g + 0.587f*p.b;
+}
+
+// IMAGE
+
+template<typename T>
 image<T>::image()
 	: width(0), height(0), pixels()
 { }
