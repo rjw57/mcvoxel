@@ -188,7 +188,7 @@ void scene::make_sky_ray(ray& out_ray) const
 			&out_ray);
 }
 
-float scene::luminance_transfer(path& p) const
+float scene::luminance_transfer(const path& p) const
 {
 	assert(p.vertices.size() + 1 == p.known_visible.size());
 
@@ -210,10 +210,7 @@ float scene::luminance_transfer(path& p) const
 			return 1.f;
 
 		if(sky_visible(eye_pos, sky_dir))
-		{
-			p.known_visible.front() = true;
 			return 1.f;
-		}
 
 		return 0.f;
 	}
@@ -228,7 +225,6 @@ float scene::luminance_transfer(path& p) const
 	// if eye not visible, the whole path is invalid
 	if(!p.known_visible.back() && !visible(eye_pos, pos))
 		return  0.f;
-	p.known_visible.back() = true;
 
 	// fold in last vertex -> eye contribution
 	Vector to_eye = pt_vector_normalise3(pt_vector_sub(eye_pos, pos));
@@ -250,7 +246,6 @@ float scene::luminance_transfer(path& p) const
 		// if no sky visibility, no path
 		if(!p.known_visible.front() && !sky_visible(pos, sky_dir))
 			return 0.f;
-		p.known_visible.front() = true;
 
 		contribution *= pt_vector_get_w(pt_vector_dot3(normal, sky_dir));
 	}
@@ -276,7 +271,6 @@ float scene::luminance_transfer(path& p) const
 			// if we ever fail a visibility test, the entire path is dark
 			if(!(*known_visible_it) && !visible(start_point, end_point))
 				return 0.f;
-			*known_visible_it = true;
 
 			float vertex_contribution = 1.f;
 

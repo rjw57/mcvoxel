@@ -98,8 +98,7 @@ class scene : public boost::noncopyable
 		void make_sky_ray(ray& out_ray) const;
 
 		// given a path through the world, compute the luminance transfer for that path
-		// N.B. this will modify the known_visible flags in path as appropriate
-		float luminance_transfer(path& p) const;
+		float luminance_transfer(const path& p) const;
 
 		// return true iff a and b are visible to each other
 		bool visible(const Vector& a, const Vector& b) const;
