@@ -130,6 +130,7 @@ class crystalised_octree
 		explicit crystalised_octree(const octree<T>& octree);
 
 		// simple inline functions
+		const location& first_loc() const { return min_loc_; }
 		int32_t size() const { return static_cast<int32_t>(1) << log_2_size_; }
 
 		// get the extent of this octree

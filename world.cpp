@@ -134,6 +134,40 @@ void load_cached_world(std::istream& is, world& w)
 	}
 }
 
+void extent(const world& w, octree::location& first_loc, octree::location& last_loc)
+{
+	if(w.size() == 0)
+	{
+		first_loc = last_loc = octree::location(0, 0, 0);
+		return;
+	}
+
+	first_loc = w[0].first_loc();
+	last_loc = octree::location(
+			first_loc.x + w[0].size(),
+			first_loc.y + w[0].size(),
+			first_loc.z + w[0].size());
+
+	BOOST_FOREACH(const octree::crystalised_octree& tree, w)
+	{
+		octree::location this_first_loc(tree.first_loc());
+		octree::location this_last_loc = octree::location(
+				this_first_loc.x + tree.size(),
+				this_first_loc.y + tree.size(),
+				this_first_loc.y + tree.size());
+
+		first_loc = octree::location(
+				std::min(first_loc.x, this_first_loc.x),
+				std::min(first_loc.y, this_first_loc.y),
+				std::min(first_loc.z, this_first_loc.z));
+
+		last_loc = octree::location(
+				std::max(last_loc.x, this_last_loc.x),
+				std::max(last_loc.y, this_last_loc.y),
+				std::max(last_loc.z, this_last_loc.z));
+	}
+}
+
 bool cast_ray(const world& w, const ray& r)
 {
 	octree::sub_location dummy_loc;

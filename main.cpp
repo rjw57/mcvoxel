@@ -8,6 +8,8 @@
 #include <stdexcept>
 #include <boost/program_options.hpp>
 
+#include "octree.hpp"
+#include "io.hpp"
 #include "scene.hpp"
 #include "sky.hpp"
 #include "world.hpp"
@@ -65,6 +67,10 @@ struct main
 		{
 			throw std::runtime_error("must specify at least one of world or cached world");
 		}
+
+		octree::location first(0,0,0), last(0,0,0);
+		world::extent(scene.world, first, last);
+		std::cout << "World size " << first << " -> " << last << "\n";
 	}
 
 	void write_output() const
@@ -79,7 +85,7 @@ struct main
 		int w(samples.width), h(samples.height);
 
 		// rationale: a uniformly bright sky (with integral 4*pi) will result in a lambertian surface
-		// having brightness pi => want to scale brightness by 1/pi == 4/integral
+		// having brightness 1/pi => want to scale brightness by 1/pi == 4/integral
 		float lum_scale = 4.f / scene.sky.lum_integral();
 		data::image<pixel_u8> tone_mapped(samples.width, samples.height);
 		for(int32_t idx=0; idx<w*h; ++idx)
@@ -150,7 +156,7 @@ struct main
 
 		// set output size and initialise the scene
 		scene.initialise(848, 480);
-		scene.set_camera(0, 1500, 0, 0, 90);
+		scene.set_camera(0, 128, 0, 0, 20);
 
 		try
 		{
