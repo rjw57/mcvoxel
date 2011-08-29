@@ -6,6 +6,8 @@
 #include <fstream>
 #include <iostream>
 #include <stdexcept>
+#include <boost/lexical_cast.hpp>
+#include <boost/tokenizer.hpp>
 #include <boost/program_options.hpp>
 
 #include "octree.hpp"
@@ -133,6 +135,45 @@ struct main
 			error(1, 0, "must specify output stem via --output");
 		}
 
+		// work out camera position
+		float pitch = options["pitch"].as<float>();
+		float yaw = options["yaw"].as<float>();
+		float cam_x = 0.f, cam_y = 0.f, cam_z = 0.f;
+		if(options.count("at"))
+		{
+			using boost::tokenizer;
+			using boost::escaped_list_separator;
+			using boost::lexical_cast;
+			using boost::bad_lexical_cast;
+
+			typedef tokenizer<escaped_list_separator<char> > tokenizer_t;
+
+			std::deque<float> fields;
+			tokenizer_t tok(options["at"].as<std::string>());
+			try
+			{
+				BOOST_FOREACH(const std::string& s, tok)
+				{
+					float fv = lexical_cast<float>(s);
+					fields.push_back(fv);
+				}
+			}
+			catch (const bad_lexical_cast& e)
+			{
+				error(1, 0, "error parsing camera position specifier '%s': %s",
+						options["at"].as<std::string>().c_str(), e.what());
+			}
+
+			if(fields.size() != 3)
+				error(1, 0, "camera position specifier '%s' does not have three fields",
+						options["at"].as<std::string>().c_str());
+
+			cam_x = fields[0]; cam_y = fields[1]; cam_z = fields[2];
+		}
+
+		std::cout << "camera at: " << cam_x << "," << cam_y << "," << cam_z << " ";
+		std::cout << "yaw: " << yaw << " pitch: " << pitch << "\n";
+
 		// try to load the sky
 		try {
 			if(options.count("sky"))
@@ -156,7 +197,7 @@ struct main
 
 		// set output size and initialise the scene
 		scene.initialise(848, 480);
-		scene.set_camera(0, 128, 0, 0, 20);
+		scene.set_camera(cam_x, cam_y, cam_z, yaw, pitch);
 
 		try
 		{
@@ -190,7 +231,7 @@ struct main
 		generic.add_options()
 			("help,h", "print a brief usage summary")
 			("output,o", po::value<std::string>(), "write output to files whose name begin with arg")
-			("num-passes,n", po::value<int>()->default_value(64), "number of passes (default 64)")
+			("num-passes,n", po::value<int>()->default_value(64), "number of passes")
 		;
 		cmdline_opts.add(generic);
 
@@ -204,6 +245,9 @@ struct main
 		po::options_description scene("Scene description options");
 		scene.add_options()
 			("sky,s", po::value<std::string>(), "load HDR sky probe image")
+			("pitch,p", po::value<float>()->default_value(0.f), "pitch of camera in degrees")
+			("yaw,y", po::value<float>()->default_value(0.f), "yaw of camera in degrees")
+			("at,a", po::value<std::string>()->default_value("0,128,0"), "position of camera in the form x,y,z")
 		;
 		cmdline_opts.add(scene);
 
