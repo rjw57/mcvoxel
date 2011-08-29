@@ -35,7 +35,7 @@ void scene::initialise(int w, int h)
 	current_state_.image_x = w >> 1;
 	current_state_.image_y = h >> 1;
 
-	current_state_.light_path.vertices.clear();
+	current_state_.light_path.bounces.clear();
 	current_state_.light_path.eye_pos = camera_origin_;
 	current_state_.light_path.from_sky = false;
 	current_state_.light_path_lik = 0.f;
@@ -45,9 +45,41 @@ void scene::initialise(int w, int h)
 	log_r2_over_r1_ = log(r2_/r1_);
 }
 
+bool scene::bounce_ray(ray& incident, bounce& bounce) const
+{
+	world_position bounce_pos;
+	octree::sub_location sub_loc;
+	data::block block;
+	data::vec3_f32 norm;
+
+	// if we don't hit, terminate here
+	if(!world::cast_ray(world, incident, sub_loc, block, norm))
+		return false;
+
+	// start filling in the bounce structure
+	bounce.where.pos = data::vec3_f32(sub_loc.coords[0], sub_loc.coords[1], sub_loc.coords[2]);
+	bounce.where.norm = norm;
+	bounce.where.node_ext = sub_loc.node_extent;
+	bounce.where.node_block = block;
+
+	bounce.incident_dir = data::vec3_f32(incident.i, incident.j, incident.k);
+
+	// Lambertian BRDF (cosine term is wrapped in luminance transfer function)
+	bounce.brdf = 1.f;
+
+	// choose a new ray direction
+	bounce.bounce_dir = pt_sampling_cosine(norm);
+
+	return true;
+}
+
+void scene::generate_initial_path(path& out_p) const
+{
+}
+
 void scene::draw()
 {
-	typedef std::deque<world_position> subpath_t;
+	typedef std::deque<bounce> subpath_t;
 
 	perturb_image_loc(current_state_.image_x, current_state_.image_y, current_state_.image_x, current_state_.image_y);
 	sample_recorder& record(samples_.at(floor(current_state_.image_x), floor(current_state_.image_y)));
@@ -95,7 +127,7 @@ void scene::draw()
 
 			// fill in sky part of the path
 			p.from_sky = true;
-			p.sky_dir = data::vec3_f32(sky_ray.i, sky_ray.j, sky_ray.k);
+			data::vec3_f32 sky_dir = data::vec3_f32(sky_ray.i, sky_ray.j, sky_ray.k);
 
 			// fill in the eye part of the path
 			p.eye_pos = camera_origin_;
@@ -103,23 +135,32 @@ void scene::draw()
 			// copy the appropriate number of sky_ray items
 			subpath_t::const_iterator sky_first(sky_path.begin());
 			subpath_t::const_iterator sky_last(sky_path.begin()); std::advance(sky_last, n_sky);
-			std::copy(sky_first, sky_last, std::back_inserter(p.vertices));
-
-			// we know that all the sky path vertices can see each other
-			for(size_t i=0; i < n_sky; ++i)
-				p.known_visible.push_back(true);
-
-			// we don't know if the join between the sky path and eye path is visible
-			p.known_visible.push_back(false);
-
-			// we know that all the eye path vertices can see each other
-			for(size_t i=0; i < n_eye; ++i)
-				p.known_visible.push_back(true);
+			std::copy(sky_first, sky_last, std::back_inserter(p.bounces));
 
 			// we want to copy the first n_eye items from the eye ray but insert them backwards
 			subpath_t::const_iterator eye_first(eye_path.begin());
 			subpath_t::const_iterator eye_last(eye_path.begin()); std::advance(eye_last, n_eye);
-			std::reverse_copy(eye_first, eye_last, std::back_inserter(p.vertices));
+			std::reverse_copy(eye_first, eye_last, std::back_inserter(p.bounces));
+
+			// we need to fix up the bounce directions at the join
+			off_t first_eye_idx = n_sky;
+			bounce& first_eye(p.bounces[first_eye_idx]);
+			if(first_eye_idx > 0)
+			{
+				bounce& last_sky(p.bounces[first_eye_idx-1]);
+				Vector sky_to_eye = pt_vector_normalise3(
+						pt_vector_sub(first_eye.where.pos, last_sky.where.pos));
+				first_eye.incident_dir = sky_to_eye;
+				last_sky.bounce_dir = sky_to_eye;
+
+				// FIXME: Update BRDF when we support them
+			}
+			else
+			{
+				first_eye.incident_dir = sky_dir;
+
+				// FIXME: Update BRDF when we support them
+			}
 
 			// record the sky sample times luminance transfer
 			record(sky_sample * luminance_transfer(p));
@@ -199,107 +240,82 @@ void scene::make_sky_ray(ray& out_ray) const
 
 float scene::luminance_transfer(const path& p) const
 {
-	assert(p.vertices.size() + 1 == p.known_visible.size());
+	// assert(p.vertices.size() + 1 == p.known_visible.size());
 
-	float contribution = 1.f;
+	// the full transfer is built up multiplicatively
+	float transfer = 1.f;
 
 	// Create a vector for the eye position
 	Vector eye_pos = p.eye_pos;
 
-	// if no intermediate vertices, just do an eye sky test
-	if(p.vertices.size() == 0)
+	// there needs to be at least one bounce
+	assert(p.bounces.size() > 0);
+
+	// handle the last bounce -> eye
 	{
-		if(!p.from_sky)
-			return 0.;
+		const bounce &last_bounce(p.bounces.back());
 
-		// work out direction _to_ sky from eye.
-		Vector sky_dir = pt_vector_neg(p.sky_dir);
+		// extract location and normal of bounce
+		Vector p = last_bounce.where.pos, n = last_bounce.where.norm;
 
-		if(p.known_visible.front())
-			return 1.f;
+		// check visibility
+		if(!visible(eye_pos, p))
+			return  0.f;
 
-		if(sky_visible(eye_pos, sky_dir))
-			return 1.f;
-
-		return 0.f;
+		// fold in transfer
+		transfer *= pt_vector_get_w(pt_vector_dot3(n, last_bounce.bounce_dir));
 	}
 
-	// handle the last vertex -> eye
-	const world_position& last_v(p.vertices.back());
-
-	// work out the position and normal of the first vertex
-	Vector pos = last_v.pos;
-	Vector normal = last_v.norm;
-
-	// if eye not visible, the whole path is invalid
-	if(!p.known_visible.back() && !visible(eye_pos, pos))
-		return  0.f;
-
-	// fold in last vertex -> eye contribution
-	Vector to_eye = pt_vector_normalise3(pt_vector_sub(eye_pos, pos));
-	contribution *= pt_vector_get_w(pt_vector_dot3(normal, to_eye));
-
-	// now we need to handle the sky->first vertex assuming luminance came from the sky
+	// now we need to handle the sky->first bounce assuming luminance came from the sky
 	if(p.from_sky)
 	{
-		// find first vertex
-		const world_position& v(p.vertices.front());
+		// find first bounce
+		const bounce& first_bounce(p.bounces.front());
 
-		// work out the position and normal of the first vertex
-		Vector pos = v.pos;
-		Vector normal = v.norm;
+		// extract position and normal of bounce
+		Vector p = first_bounce.where.pos, n = first_bounce.where.norm;
 
-		// direction _to_ sky from vertex
-		Vector sky_dir = pt_vector_neg(p.sky_dir);
+		// direction _to_ sky from bounce
+		Vector sky_dir = pt_vector_neg(first_bounce.incident_dir);
 
 		// if no sky visibility, no path
-		if(!p.known_visible.front() && !sky_visible(pos, sky_dir))
+		if(!sky_visible(p, sky_dir))
 			return 0.f;
 
-		contribution *= pt_vector_get_w(pt_vector_dot3(normal, sky_dir));
+		transfer *= pt_vector_get_w(pt_vector_dot3(n, sky_dir));
 	}
 
-	// handle the vertex-to-vertex differential beam throughput, starting from the first vertex
-	if(p.vertices.size() > 1)
+	// handle the bounce-to-bounce differential beam throughput, starting from the first bounce
+	if(p.bounces.size() > 1)
 	{
-		path::vertex_collection::const_iterator v_it(p.vertices.begin());
-		path::flag_collection::const_iterator known_visible_it(p.known_visible.begin());
+		path::bounce_collection::const_iterator b_it(p.bounces.begin());
 
 		// work out the position and normal of the first vertex.
-		Vector start_point = v_it->pos;
-		Vector start_normal = v_it->norm;
+		Vector start_point = b_it->where.pos, start_normal = b_it->where.norm;
 
 		// for the remaining vertices...
-		BOOST_FOREACH(const world_position& wp, std::make_pair(++v_it, p.vertices.end()))
+		BOOST_FOREACH(const bounce& bounce, std::make_pair(++b_it, p.bounces.end()))
 		{
-			++known_visible_it;
-
-			Vector end_point = wp.pos;
-			Vector end_normal = wp.norm;
+			Vector end_point = bounce.where.pos, end_normal = bounce.where.norm;
 
 			// if we ever fail a visibility test, the entire path is dark
-			if(!(*known_visible_it) && !visible(start_point, end_point))
+			if(!visible(start_point, end_point))
 				return 0.f;
-
-			float vertex_contribution = 1.f;
 
 			// compute 1/||end - start||^2
 			Vector delta = pt_vector_sub(end_point, start_point);
 			float recip_delta_sq = pt_vector_get_w(pt_vector_w_reciprocal(pt_vector_dot3(delta, delta)));
 
-			// what is the normalised delta from start -> end
-			Vector norm_delta = pt_vector_normalise3(delta);
+			// what is the normalised delta from start -> end, i.e. this bounce's incident dir
+			Vector end_incident_dir = bounce.incident_dir;
 
 			// work out cosine delta to normal for start and end
-			vertex_contribution *= pt_vector_get_w(pt_vector_abs(pt_vector_mul(
-							pt_vector_dot3(start_normal, norm_delta),
-							pt_vector_dot3(end_normal, pt_vector_neg(norm_delta)))));
+			transfer *= pt_vector_get_w(pt_vector_abs(pt_vector_mul(
+							pt_vector_dot3(start_normal, end_incident_dir),
+							pt_vector_dot3(end_normal, pt_vector_neg(end_incident_dir)))));
 
 			// multiply in 1/||end - start||^2
-			vertex_contribution *= recip_delta_sq;
-
-			// fold this vertex's contribution into the whole
-			contribution *= vertex_contribution;
+			transfer *= recip_delta_sq;
 
 			// prepare for the next iteration
 			start_point = end_point;
@@ -307,7 +323,7 @@ float scene::luminance_transfer(const path& p) const
 		}
 	}
 
-	return contribution;
+	return transfer;
 }
 
 bool scene::visible(const Vector& a, const Vector& b) const

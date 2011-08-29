@@ -21,30 +21,22 @@ void scene::trace_ray(ray& in_r, int max_bounces, OutputIterator out)
 	// don't bounce more than necessary
 	while(max_bounces > 0)
 	{
+		bounce new_bounce;
+
 		// if we don't hit, terminate here
-		if(!world::cast_ray(world, r, sub_loc, block, bounce_pos.norm))
+		if(!bounce_ray(r, new_bounce))
 			return;
 
-		// create out new position structure and add it to the iterator
-		bounce_pos.pos = data::vec3_f32(sub_loc.coords[0], sub_loc.coords[1], sub_loc.coords[2]);
-		bounce_pos.node_ext = sub_loc.node_extent;
-		bounce_pos.node_block = block;
-
-		*out++ = bounce_pos;
+		*out++ = new_bounce;
 		--max_bounces;
 
-		// if we no more bounces, we're done
-		if(max_bounces <= 0)
-			continue;
-
-		// otherwise, choose a new ray direction and bounce it
-		Vector normal = bounce_pos.norm;
-		Vector new_dir = pt_sampling_cosine(normal);
-
-		make_ray(bounce_pos.pos.x, bounce_pos.pos.y, bounce_pos.pos.z,
-				pt_vector_get_x(new_dir),
-				pt_vector_get_y(new_dir),
-				pt_vector_get_z(new_dir),
+		make_ray(
+				new_bounce.where.pos.x,
+				new_bounce.where.pos.y,
+				new_bounce.where.pos.z,
+				new_bounce.bounce_dir.x,
+				new_bounce.bounce_dir.y,
+				new_bounce.bounce_dir.z,
 				&r);
 	}
 }
