@@ -22,7 +22,7 @@ scene::scene()
 	, r1_(0.1f), r2_(1.f), log_r2_over_r1_(log(r2_/r1_))
 {
 	initialise(1, 1);
-	set_camera(0.f, 0.f, 0.f, 0.f, 0.f);
+	set_camera(data::vec3_f32(0.f, 0.f, 0.f), 0.f, 0.f);
 }
 
 scene::~scene()
@@ -89,7 +89,10 @@ void scene::draw()
 
 			// fill in sky part of the path
 			p.from_sky = true;
-			p.sky_x = sky_ray.i; p.sky_y = sky_ray.j; p.sky_z = sky_ray.k;
+			p.sky_dir = data::vec3_f32(sky_ray.i, sky_ray.j, sky_ray.k);
+
+			// fill in the eye part of the path
+			p.eye_pos = camera_origin_;
 
 			// copy the appropriate number of sky_ray items
 			subpath_t::const_iterator sky_first(sky_path.begin());
@@ -131,7 +134,7 @@ void scene::peturb_image_loc(float x, float y, float& new_x, float& new_y) const
 	while((new_x < 0) || (new_y < 0) || (new_x >= samples_.width) || (new_y >= samples_.height));
 }
 
-void scene::set_camera(float x, float y, float z, float yaw, float pitch)
+void scene::set_camera(const data::vec3_f32& origin, float yaw, float pitch)
 {
 	// convert yaw and pitch to radians
 	cam_pitch_ = pitch * (2.f * 3.14159f / 360.f);
@@ -142,7 +145,7 @@ void scene::set_camera(float x, float y, float z, float yaw, float pitch)
 	cos_yaw_ = cos(cam_yaw_); sin_yaw_ = sin(cam_yaw_);
 
 	// save camera origin
-	cam_x_ = x; cam_y_ = y; cam_z_ = z;
+	camera_origin_ = origin;
 }
 
 void scene::make_eye_ray(float fx, float fy, ray& out_ray) const
@@ -158,7 +161,7 @@ void scene::make_eye_ray(float fx, float fy, ray& out_ray) const
 	i = new_i; k = new_k2;
 
 	float mag = sqrt(i*i + j*j + k*k);
-	make_ray(cam_x_, cam_y_, cam_z_, i/mag, j/mag, k/mag, &out_ray);
+	make_ray(camera_origin_.x, camera_origin_.y, camera_origin_.z, i/mag, j/mag, k/mag, &out_ray);
 }
 
 void scene::make_sky_ray(ray& out_ray) const
@@ -195,7 +198,7 @@ float scene::luminance_transfer(const path& p) const
 	float contribution = 1.f;
 
 	// Create a vector for the eye position
-	Vector eye_pos = pt_vector_make(cam_x_, cam_y_, cam_z_, 0.f);
+	Vector eye_pos = p.eye_pos;
 
 	// if no intermediate vertices, just do an eye sky test
 	if(p.vertices.size() == 0)
@@ -204,7 +207,7 @@ float scene::luminance_transfer(const path& p) const
 			return 0.;
 
 		// work out direction _to_ sky from eye.
-		Vector sky_dir = pt_vector_make(-p.sky_x, -p.sky_y, -p.sky_z, 0.f);
+		Vector sky_dir = pt_vector_neg(p.sky_dir);
 
 		if(p.known_visible.front())
 			return 1.f;
@@ -219,8 +222,8 @@ float scene::luminance_transfer(const path& p) const
 	const world_position& last_v(p.vertices.back());
 
 	// work out the position and normal of the first vertex
-	Vector pos = pt_vector_make(last_v.pos_x, last_v.pos_y, last_v.pos_z, 0.f);
-	Vector normal = pt_vector_make(last_v.norm_x, last_v.norm_y, last_v.norm_z, 0.f);
+	Vector pos = last_v.pos;
+	Vector normal = last_v.norm;
 
 	// if eye not visible, the whole path is invalid
 	if(!p.known_visible.back() && !visible(eye_pos, pos))
@@ -237,11 +240,11 @@ float scene::luminance_transfer(const path& p) const
 		const world_position& v(p.vertices.front());
 
 		// work out the position and normal of the first vertex
-		Vector pos = pt_vector_make(v.pos_x, v.pos_y, v.pos_z, 0.f);
-		Vector normal = pt_vector_make(v.norm_x, v.norm_y, v.norm_z, 0.f);
+		Vector pos = v.pos;
+		Vector normal = v.norm;
 
 		// direction _to_ sky from vertex
-		Vector sky_dir = pt_vector_make(-p.sky_x, -p.sky_y, -p.sky_z, 0.f);
+		Vector sky_dir = pt_vector_neg(p.sky_dir);
 
 		// if no sky visibility, no path
 		if(!p.known_visible.front() && !sky_visible(pos, sky_dir))
@@ -257,16 +260,16 @@ float scene::luminance_transfer(const path& p) const
 		path::flag_collection::const_iterator known_visible_it(p.known_visible.begin());
 
 		// work out the position and normal of the first vertex.
-		Vector start_point = pt_vector_make(v_it->pos_x, v_it->pos_y, v_it->pos_z, 0.f);
-		Vector start_normal = pt_vector_make(v_it->norm_x, v_it->norm_y, v_it->norm_z, 0.f);
+		Vector start_point = v_it->pos;
+		Vector start_normal = v_it->norm;
 
 		// for the remaining vertices...
 		BOOST_FOREACH(const world_position& wp, std::make_pair(++v_it, p.vertices.end()))
 		{
 			++known_visible_it;
 
-			Vector end_point = pt_vector_make(wp.pos_x, wp.pos_y, wp.pos_z, 0.f);
-			Vector end_normal = pt_vector_make(wp.norm_x, wp.norm_y, wp.norm_z, 0.f);
+			Vector end_point = wp.pos;
+			Vector end_normal = wp.norm;
 
 			// if we ever fail a visibility test, the entire path is dark
 			if(!(*known_visible_it) && !visible(start_point, end_point))
@@ -316,8 +319,8 @@ bool scene::visible(const Vector& a, const Vector& b) const
 
 	// cast it...
 	octree::sub_location sl; data::block bl;
-	float nx, ny, nz;
-	if(!world::cast_ray(world, test_ray, sl, bl, nx, ny, nz))
+	data::vec3_f32 normal;
+	if(!world::cast_ray(world, test_ray, sl, bl, normal))
 		return false; // (shouldn't really happen I think)
 
 	// where did we hit?
@@ -328,7 +331,7 @@ bool scene::visible(const Vector& a, const Vector& b) const
 	float mag_hit_delta = pt_vector_get_w(pt_vector_w_sqrt(pt_vector_dot3(hit_delta, hit_delta)));
 
 	// bit of a HACK here...
-	return mag_hit_delta >= (mag_delta - 0.1f);
+	return mag_hit_delta >= mag_delta;
 }
 
 bool scene::sky_visible(const Vector& p, const Vector& dir) const

@@ -51,19 +51,19 @@ struct main
 	{
 		if(options.count("world"))
 		{
-			world::load_world(options["world"].as<std::string>().c_str(), scene.world);
+			world::load(options["world"].as<std::string>().c_str(), scene.world);
 
 			// save a cache if we were asked to
 			if(options.count("cached-world"))
 			{
 				std::ofstream output(options["cached-world"].as<std::string>().c_str());
-				world::save_cached_world(output, scene.world);
+				world::save_cached(output, scene.world);
 			}
 		}
 		else if(options.count("cached-world"))
 		{
 			std::ifstream input(options["cached-world"].as<std::string>().c_str());
-			world::load_cached_world(input, scene.world);
+			world::load_cached(input, scene.world);
 		}
 		else
 		{
@@ -138,7 +138,8 @@ struct main
 		// work out camera position
 		float pitch = options["pitch"].as<float>();
 		float yaw = options["yaw"].as<float>();
-		float cam_x = 0.f, cam_y = 0.f, cam_z = 0.f;
+		data::vec3_f32 camera;
+
 		if(options.count("at"))
 		{
 			using boost::tokenizer;
@@ -149,7 +150,8 @@ struct main
 			typedef tokenizer<escaped_list_separator<char> > tokenizer_t;
 
 			std::deque<float> fields;
-			tokenizer_t tok(options["at"].as<std::string>());
+			const std::string& at_str(options["at"].as<std::string>());
+			tokenizer_t tok(at_str);
 			try
 			{
 				BOOST_FOREACH(const std::string& s, tok)
@@ -161,17 +163,17 @@ struct main
 			catch (const bad_lexical_cast& e)
 			{
 				error(1, 0, "error parsing camera position specifier '%s': %s",
-						options["at"].as<std::string>().c_str(), e.what());
+						at_str.c_str(), e.what());
 			}
 
 			if(fields.size() != 3)
 				error(1, 0, "camera position specifier '%s' does not have three fields",
-						options["at"].as<std::string>().c_str());
+						at_str.c_str());
 
-			cam_x = fields[0]; cam_y = fields[1]; cam_z = fields[2];
+			camera = data::vec3_f32(fields[0], fields[1], fields[2]);
 		}
 
-		std::cout << "camera at: " << cam_x << "," << cam_y << "," << cam_z << " ";
+		std::cout << "camera at: " << camera.x << "," << camera.y << "," << camera.z << " ";
 		std::cout << "yaw: " << yaw << " pitch: " << pitch << "\n";
 
 		// try to load the sky
@@ -197,7 +199,7 @@ struct main
 
 		// set output size and initialise the scene
 		scene.initialise(848, 480);
-		scene.set_camera(cam_x, cam_y, cam_z, yaw, pitch);
+		scene.set_camera(camera, yaw, pitch);
 
 		try
 		{

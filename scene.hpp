@@ -16,9 +16,10 @@ namespace scene
 
 struct world_position
 {
-	float            pos_x, pos_y, pos_z;
-	float            norm_x, norm_y, norm_z;
+	// position on world and normal at this point
+	data::vec3_f32  pos, norm;
 
+	// extent and content of octree node at this point
 	octree::extent   node_ext;
 	data::block      node_block;
 };
@@ -40,9 +41,10 @@ struct path
 
 	// sky support, valid if from_sky is true
 	bool                       from_sky;
-	float                      sky_x, sky_y, sky_z; // direction _from_ sky
+	data::vec3_f32            sky_dir; // direction _from_ sky
 
-	// eye position is assumed to be (cam_x_, cam_y_, cam_z_)
+	// eye position
+	data::vec3_f32            eye_pos;
 };
 
 class scene : public boost::noncopyable
@@ -62,7 +64,7 @@ class scene : public boost::noncopyable
 		~scene();
 
 		// initialise camera position
-		void set_camera(float x, float y, float z, float yaw, float pitch);
+		void set_camera(const data::vec3_f32& origin, float yaw, float pitch);
 
 		// initialise chains for sampling into image
 		void initialise(int w, int h);
@@ -81,7 +83,7 @@ class scene : public boost::noncopyable
 		float current_x_, current_y_;
 
 		// camera position, pose and cached parameters
-		float cam_x_, cam_y_, cam_z_;
+		data::vec3_f32 camera_origin_;
 		float cam_pitch_, cos_pitch_, sin_pitch_;
 		float cam_yaw_, cos_yaw_, sin_yaw_;
 

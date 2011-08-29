@@ -6,6 +6,53 @@ namespace data
 {
 
 template<typename T>
+vec3<T>::vec3()
+	: x(), y(), z()
+{ }
+
+template<typename T>
+vec3<T>::vec3(const T& x, const T& y, const T& z)
+	: x(x), y(y), z(z)
+{ }
+
+template<typename T>
+vec3<T>::vec3(const Vector& v)
+	: x(pt_vector_get_x(v)), y(pt_vector_get_y(v)), z(pt_vector_get_z(v))
+{ }
+
+template<typename T>
+vec3<T> vec3<T>::operator+=(const vec3<T>& p)
+{
+	x += p.x; y += p.y; z += p.z;
+}
+
+template<typename T>
+vec3<T> vec3<T>::operator-=(const vec3<T>& p)
+{
+	x -= p.x; y -= p.y; z -= p.z;
+}
+
+template<typename T>
+vec3<T> vec3<T>::operator*=(const T& v)
+{
+	x *= v; y *= v; z *= v;
+}
+
+template<typename T>
+vec3<T> vec3<T>::operator/=(const T& v)
+{
+	x /= v; y /= v; z /= v;
+}
+
+template<typename T>
+vec3<T>::operator Vector () const
+{
+	return pt_vector_make(x, y, z, 0.f);
+}
+
+// PIXEL
+
+template<typename T>
 pixel<T> pixel<T>::operator + (const pixel<T>& p) const
 {
 	pixel<T> rv;

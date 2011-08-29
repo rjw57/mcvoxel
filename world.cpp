@@ -67,7 +67,7 @@ struct load_level : public std::unary_function<const mc::utils::level_coord&, vo
 	octree::octree<data::block>&        octree;
 };
 
-void load_world(const char* filename, world& whence)
+void load(const char* filename, world& whence)
 {
 	mc::world world(filename);
 	whence.clear();
@@ -99,7 +99,7 @@ void load_world(const char* filename, world& whence)
 	}
 }
 
-void save_cached_world(std::ostream& os, const world& w)
+void save_cached(std::ostream& os, const world& w)
 {
 	namespace bio = boost::iostreams;
 	bio::filtering_ostream output;
@@ -114,7 +114,7 @@ void save_cached_world(std::ostream& os, const world& w)
 	}
 }
 
-void load_cached_world(std::istream& is, world& w)
+void load_cached(std::istream& is, world& w)
 {
 	namespace bio = boost::iostreams;
 	bio::filtering_istream input;
@@ -172,12 +172,11 @@ bool cast_ray(const world& w, const ray& r)
 {
 	octree::sub_location dummy_loc;
 	data::block dummy_block;
-	float nx, ny, nz;
-	return cast_ray(w, r, dummy_loc, dummy_block, nx, ny, nz);
+	data::vec3_f32 dummy_normal;
+	return cast_ray(w, r, dummy_loc, dummy_block, dummy_normal);
 }
 
-bool cast_ray(const world& w, const ray& r, octree::sub_location& out_sub_loc, data::block& out_block,
-		float& normal_x, float& normal_y, float &normal_z)
+bool cast_ray(const world& w, const ray& r, octree::sub_location& out_sub_loc, data::block& out_block, data::vec3_f32& normal)
 {
 	float min_dist_sq = -1.f;
 
@@ -214,9 +213,9 @@ bool cast_ray(const world& w, const ray& r, octree::sub_location& out_sub_loc, d
 	float hit_y = out_sub_loc.coords[1];
 	float hit_z = out_sub_loc.coords[2];
 
-	normal_x = hit_x - mid_x;
-	normal_y = hit_y - mid_y;
-	normal_z = hit_z - mid_z;
+	float normal_x = hit_x - mid_x;
+	float normal_y = hit_y - mid_y;
+	float normal_z = hit_z - mid_z;
 
 	// convert the spherical normal into a cubical one...
 	float abs_x = fabs(normal_x), abs_y = fabs(normal_y), abs_z = fabs(normal_z);
@@ -243,6 +242,8 @@ bool cast_ray(const world& w, const ray& r, octree::sub_location& out_sub_loc, d
 		normal_y /= mag_normal;
 		normal_z /= mag_normal;
 	}
+
+	normal = data::vec3_f32(normal_x, normal_y, normal_z);
 
 	return true;
 }
