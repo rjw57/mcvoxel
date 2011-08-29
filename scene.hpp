@@ -41,10 +41,18 @@ struct path
 
 	// sky support, valid if from_sky is true
 	bool                       from_sky;
-	data::vec3_f32            sky_dir; // direction _from_ sky
+	data::vec3_f32             sky_dir; // direction _from_ sky
 
 	// eye position
-	data::vec3_f32            eye_pos;
+	data::vec3_f32             eye_pos;
+};
+
+// a structure giving the current state of a MH chain
+struct mh_state
+{
+	float image_x, image_y; // location in image plane
+	path  light_path;       // light transport path through world
+	float light_path_lik;   // the likelihood of the path
 };
 
 class scene : public boost::noncopyable
@@ -79,19 +87,19 @@ class scene : public boost::noncopyable
 		// samples currently drawn
 		image samples_;
 
-		// current image plane co-ordinate
-		float current_x_, current_y_;
+		// the current state of the MH chain
+		mh_state current_state_;
 
 		// camera position, pose and cached parameters
 		data::vec3_f32 camera_origin_;
 		float cam_pitch_, cos_pitch_, sin_pitch_;
 		float cam_yaw_, cos_yaw_, sin_yaw_;
 
-		// image plane peturbation parameters
+		// image plane perturbation parameters
 		float r1_, r2_, log_r2_over_r1_;
 
 		// choose a new image location, given the existing one
-		void peturb_image_loc(float x, float y, float& new_x, float& new_y) const;
+		void perturb_image_loc(float x, float y, float& new_x, float& new_y) const;
 
 		// convert an image plane co-ordinate into an eye ray
 		void make_eye_ray(float x, float y, ray& out_ray) const;

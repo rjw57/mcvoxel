@@ -18,8 +18,7 @@ namespace scene
 static float uniform_real();
 
 scene::scene()
-	: current_x_(0.f), current_y_(0.f)
-	, r1_(0.1f), r2_(1.f), log_r2_over_r1_(log(r2_/r1_))
+	: r1_(0.1f), r2_(1.f), log_r2_over_r1_(log(r2_/r1_))
 {
 	initialise(1, 1);
 	set_camera(data::vec3_f32(0.f, 0.f, 0.f), 0.f, 0.f);
@@ -32,9 +31,16 @@ void scene::initialise(int w, int h)
 {
 	samples_.resize(w, h);
 
-	current_x_ = 0.5f * samples_.width;
-	current_y_ = 0.5f * samples_.height;
+	// set the initial MH state to sensible defaults
+	current_state_.image_x = w >> 1;
+	current_state_.image_y = h >> 1;
 
+	current_state_.light_path.vertices.clear();
+	current_state_.light_path.eye_pos = camera_origin_;
+	current_state_.light_path.from_sky = false;
+	current_state_.light_path_lik = 0.f;
+
+	// pre-cache the image plane perturbation parameters
 	r2_ = sqrt(0.05f * samples_.width * samples_.height); // 5% of image area
 	log_r2_over_r1_ = log(r2_/r1_);
 }
@@ -43,8 +49,8 @@ void scene::draw()
 {
 	typedef std::deque<world_position> subpath_t;
 
-	peturb_image_loc(current_x_, current_y_, current_x_, current_y_);
-	sample_recorder& record(samples_.at(floor(current_x_), floor(current_y_)));
+	perturb_image_loc(current_state_.image_x, current_state_.image_y, current_state_.image_x, current_state_.image_y);
+	sample_recorder& record(samples_.at(floor(current_state_.image_x), floor(current_state_.image_y)));
 
 	const int max_eye_path_len = 1;
 	const int max_sky_path_len = 0;
@@ -53,7 +59,7 @@ void scene::draw()
 	ray eye_ray;
 	subpath_t eye_path;
 
-	make_eye_ray(current_x_, current_y_, eye_ray);
+	make_eye_ray(current_state_.image_x, current_state_.image_y, eye_ray);
 	trace_ray(eye_ray, max_eye_path_len, std::back_inserter(eye_path));
 
 	if(eye_path.size() == 0)
@@ -121,11 +127,11 @@ void scene::draw()
 	}
 }
 
-void scene::peturb_image_loc(float x, float y, float& new_x, float& new_y) const
+void scene::perturb_image_loc(float x, float y, float& new_x, float& new_y) const
 {
 	do
 	{
-		// choose angle and distance to peturb location
+		// choose angle and distance to perturb location
 		float theta = 2.f * 3.14159f * uniform_real();
 		float r = r2_ * exp(-log_r2_over_r1_ * uniform_real());
 		new_x = x + r * cos(theta);
