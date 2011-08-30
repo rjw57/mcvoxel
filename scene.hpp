@@ -113,9 +113,6 @@ class scene : public boost::noncopyable
 		// image plane perturbation parameters
 		float r1_, r2_, log_r2_over_r1_;
 
-		// choose a new image location, given the existing one
-		void perturb_image_loc(float x, float y, float& new_x, float& new_y) const;
-
 		// convert an image plane co-ordinate into an eye ray
 		void make_eye_ray(float x, float y, ray& out_ray) const;
 
@@ -147,8 +144,13 @@ class scene : public boost::noncopyable
 		// i.e., the value of f(X) for that path.
 		float luminance_transfer(const path& p) const;
 
-		// perform a bidirectional mutation on the passed path. return
-		// false if this mutation should immediately be rejected.
+		// MH UPDATE STEPS
+		
+		// choose a new image location, given the existing one: T(new|old) = T(old|new)
+		void perturb_image_loc(float x, float y, float& new_x, float& new_y) const;
+
+		// perform a bidirectional mutation on the passed path. return false if this mutation should immediately
+		// be rejected.
 		bool bidirectional_mutate(path& p) const;
 };
 
