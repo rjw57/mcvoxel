@@ -30,7 +30,8 @@ scene::~scene()
 
 void scene::initialise(int w, int h)
 {
-	samples_.resize(w, h);
+	image_.resize(w, h);
+	n_samples_ = 0;
 
 	// set the initial MH state to sensible defaults
 	current_state_.image_x = w >> 1;
@@ -42,7 +43,7 @@ void scene::initialise(int w, int h)
 	current_state_.light_path_lik = 0.f;
 
 	// pre-cache the image plane perturbation parameters
-	r2_ = sqrt(0.05f * samples_.width * samples_.height); // 5% of image area
+	r2_ = sqrt(0.05f * image_.width * image_.height); // 5% of image area
 	log_r2_over_r1_ = log(r2_/r1_);
 }
 
@@ -65,98 +66,108 @@ bool scene::bounce_ray(ray& incident, bounce& bounce) const
 
 	// choose a new ray direction
 	bounce.bounce_dir = pt_sampling_cosine(norm);
+	//bounce.bounce_dir = pt_sampling_hemisphere(norm);
 
 	return true;
 }
 
-void scene::generate_initial_path(path& out_p) const
+bool scene::generate_initial_path(path& p, float ix, float iy) const
 {
+	typedef std::deque<bounce> subpath_t;
+	const int max_eye_path_len = 1;
+	const int max_sky_path_len = 0;
+
+	// clear the input path
+	p.bounces.clear();
+	p.from_sky = false;
+	p.eye_pos = camera_origin_;
+
+	// construct a path from the eye
+	ray eye_ray; subpath_t eye_path;
+	make_eye_ray(ix, iy, eye_ray);
+	trace_ray(eye_ray, max_eye_path_len, std::back_inserter(eye_path));
+
+	// do we only see sky?
+	if(eye_path.size() == 0)
+	{
+		p.from_sky = true; p.sky_dir = pt_vector_neg(pt_vector_make(eye_ray.i, eye_ray.j, eye_ray.k, 0.f));
+		return true;
+	}
+
+	// we need to reverse the eye ray so that it starts at the last bounce and heads towards the eye
+	subpath_t rev_eye_path;
+
+	// firstly, just copy the bounces
+	std::reverse_copy(eye_path.begin(), eye_path.end(), std::back_inserter(rev_eye_path));
+	
+	// now fix up the bounce directions
+	subpath_t::iterator now(rev_eye_path.begin());
+	subpath_t::iterator next(rev_eye_path.begin()); ++next;
+	for(; next != rev_eye_path.end(); ++next, ++now)
+	{
+		Vector now_pos = now->where.pos;
+		Vector next_pos = next->where.pos;
+		now->bounce_dir = pt_vector_normalise2(pt_vector_sub(next_pos, now_pos));
+	}
+
+	// last bounce is to eye
+	rev_eye_path.back().bounce_dir = pt_vector_normalise2(pt_vector_sub(p.eye_pos, rev_eye_path.back().where.pos));
+	
+	// construct a path from the sky
+	ray sky_ray; subpath_t sky_path;
+	make_sky_ray(sky_ray);
+	trace_ray(sky_ray, max_sky_path_len, std::back_inserter(sky_path));
+	
+	// record sky direction in path
+	p.from_sky = true;
+	p.sky_dir = data::vec3_f32(sky_ray.i, sky_ray.j, sky_ray.k); // vector pointing _from_ sky _to_ world/eye
+
+	if(sky_path.size() == 0)
+	{
+		// can the last bounce on the eye path see the sky?
+		if(!sky_visible(eye_path.back().where.pos, pt_vector_neg(p.sky_dir)))
+			return false;
+
+		// yes, copy reverse eye path -> path and return success.
+		p.bounces = rev_eye_path;
+		return true;
+	}
+
+	return false;
 }
 
 void scene::draw()
 {
+	if(n_samples_ == 0)
+	{
+		// initialise a path for the MH transport
+		while(!generate_initial_path(current_state_.light_path, current_state_.image_x, current_state_.image_y)) { /* nop */ }
+		current_state_.light_path_lik = luminance_transfer(current_state_.light_path);
+	}
+
 	typedef std::deque<bounce> subpath_t;
 
 	perturb_image_loc(current_state_.image_x, current_state_.image_y, current_state_.image_x, current_state_.image_y);
-	sample_recorder& record(samples_.at(floor(current_state_.image_x), floor(current_state_.image_y)));
 
-	const int max_eye_path_len = 1;
-	const int max_sky_path_len = 0;
+	int px(floor(current_state_.image_x)), py(floor(current_state_.image_y));
 
-	// make an eye ray path
-	ray eye_ray;
-	subpath_t eye_path;
+	while(!generate_initial_path(current_state_.light_path, current_state_.image_x, current_state_.image_y)) { /* nop */ }
+	current_state_.light_path_lik = luminance_transfer(current_state_.light_path);
 
-	make_eye_ray(current_state_.image_x, current_state_.image_y, eye_ray);
-	trace_ray(eye_ray, max_eye_path_len, std::back_inserter(eye_path));
+	pixel_f32 sample_value(0,0,0);
 
-	if(eye_path.size() == 0)
+	const path& current_path(current_state_.light_path);
+	if(current_path.from_sky)
 	{
-		// we hit sky
-		record(sky.sample(eye_ray));
-		return;
+		pixel_f32 sky_sample = sky.sample(-current_path.sky_dir.x, -current_path.sky_dir.y, -current_path.sky_dir.z);
+		sample_value = sky_sample * current_state_.light_path_lik;
 	}
 
-	// make a sky ray path
-	ray sky_ray;
-	subpath_t sky_path;
+	++n_samples_;
 
-	make_sky_ray(sky_ray);
-	trace_ray(sky_ray, max_sky_path_len, std::back_inserter(sky_path));
-
-	pixel_f32 sky_sample = sky.sample(-sky_ray.i, -sky_ray.j, -sky_ray.k);
-
-	// now for each possible path made by joining these together, work out the luminance - we always use
-	// the first vertex of the eye ray and zero or more vertices of the sky ray
-	for(size_t n_sky=0; n_sky <= sky_path.size(); ++n_sky)
-	{
-		// must have at least one item from the eye path since it makes sure the eye ray corresponds
-		// to this pixel.
-		for(size_t n_eye=1; n_eye <= eye_path.size(); ++n_eye)
-		{
-			path p;
-
-			// we know ahead of time how many items will be in these collections. Should we move
-			// to using vectors, we could make use of that knowledge here.
-			// p.vertices.reserve(n_sky + n_eye);
-			// p.known_visible.reserve(1 + n_sky + n_eye);
-
-			// fill in sky part of the path
-			p.from_sky = true;
-			data::vec3_f32 sky_dir = data::vec3_f32(sky_ray.i, sky_ray.j, sky_ray.k);
-
-			// fill in the eye part of the path
-			p.eye_pos = camera_origin_;
-
-			// copy the appropriate number of sky_ray items
-			subpath_t::const_iterator sky_first(sky_path.begin());
-			subpath_t::const_iterator sky_last(sky_path.begin()); std::advance(sky_last, n_sky);
-			std::copy(sky_first, sky_last, std::back_inserter(p.bounces));
-
-			// we want to copy the first n_eye items from the eye ray but insert them backwards
-			subpath_t::const_iterator eye_first(eye_path.begin());
-			subpath_t::const_iterator eye_last(eye_path.begin()); std::advance(eye_last, n_eye);
-			std::reverse_copy(eye_first, eye_last, std::back_inserter(p.bounces));
-
-			// we need to fix up the bounce directions at the join
-			off_t first_eye_idx = n_sky;
-			bounce& first_eye(p.bounces[first_eye_idx]);
-			if(first_eye_idx > 0)
-			{
-				bounce& last_sky(p.bounces[first_eye_idx-1]);
-				Vector sky_to_eye = pt_vector_normalise3(
-						pt_vector_sub(first_eye.where.pos, last_sky.where.pos));
-				last_sky.bounce_dir = sky_to_eye;
-			}
-			else
-			{
-				p.sky_dir = sky_dir;
-			}
-
-			// record the sky sample times luminance transfer
-			record(sky_sample * luminance_transfer(p));
-		}
-	}
+	// scale by number of pixels
+	sample_value *= image_.width * image_.height;
+	image_.at(px, py) += sample_value;
 }
 
 void scene::perturb_image_loc(float x, float y, float& new_x, float& new_y) const
@@ -169,7 +180,7 @@ void scene::perturb_image_loc(float x, float y, float& new_x, float& new_y) cons
 		new_x = x + r * cos(theta);
 		new_y = y + r * sin(theta);
 	}
-	while((new_x < 0) || (new_y < 0) || (new_x >= samples_.width) || (new_y >= samples_.height));
+	while((new_x < 0) || (new_y < 0) || (new_x >= image_.width) || (new_y >= image_.height));
 }
 
 void scene::set_camera(const data::vec3_f32& origin, float yaw, float pitch)
@@ -188,9 +199,9 @@ void scene::set_camera(const data::vec3_f32& origin, float yaw, float pitch)
 
 void scene::make_eye_ray(float fx, float fy, ray& out_ray) const
 {
-	fx -= (samples_.width)>>1; fy -= (samples_.height)>>1;
+	fx -= (image_.width)>>1; fy -= (image_.height)>>1;
 
-	float i(-fx), j(-fy), k(samples_.height);
+	float i(-fx), j(-fy), k(image_.height);
 
 	float new_j = cos_pitch_*j - sin_pitch_*k, new_k = sin_pitch_*j + cos_pitch_*k;
 	j = new_j; k = new_k;
@@ -229,9 +240,16 @@ void scene::make_sky_ray(ray& out_ray) const
 			&out_ray);
 }
 
+#define ALWAYS_VISIBLE 1
+
 float scene::luminance_transfer(const path& p) const
 {
 	// assert(p.vertices.size() + 1 == p.known_visible.size());
+	if(p.bounces.size() == 0)
+	{
+		// FIXME: check visibilirt
+		return 1.f;
+	}
 
 	// the full transfer is built up multiplicatively
 	float transfer = 1.f;
@@ -249,9 +267,11 @@ float scene::luminance_transfer(const path& p) const
 		// extract location and normal of bounce
 		Vector p = last_bounce.where.pos, n = last_bounce.where.norm;
 
+#if !ALWAYS_VISIBLE
 		// check visibility
 		if(!visible(eye_pos, p))
 			return  0.f;
+#endif
 
 		// fold in transfer
 		transfer *= pt_vector_get_w(pt_vector_dot3(n, last_bounce.bounce_dir));
@@ -269,9 +289,11 @@ float scene::luminance_transfer(const path& p) const
 		// direction _to_ sky from bounce
 		Vector sky_dir = pt_vector_neg(p.sky_dir);
 
+#if !ALWAYS_VISIBLE
 		// if no sky visibility, no path
 		if(!sky_visible(pos, sky_dir))
 			return 0.f;
+#endif
 
 		transfer *= pt_vector_get_w(pt_vector_dot3(norm, sky_dir));
 	}
@@ -290,9 +312,11 @@ float scene::luminance_transfer(const path& p) const
 		{
 			Vector end_point = bounce.where.pos, end_normal = bounce.where.norm;
 
+#if !ALWAYS_VISIBLE
 			// if we ever fail a visibility test, the entire path is dark
 			if(!visible(start_point, end_point))
 				return 0.f;
+#endif
 
 			// compute 1/||end - start||^2
 			Vector delta = pt_vector_sub(end_point, start_point);
@@ -317,6 +341,11 @@ float scene::luminance_transfer(const path& p) const
 	}
 
 	return transfer;
+}
+
+bool scene::bidirectional_mutate(path& p) const
+{
+	return false;
 }
 
 bool scene::visible(const Vector& a, const Vector& b) const

@@ -70,9 +70,8 @@ struct mh_state
 class scene : public boost::noncopyable
 {
 	public:
-		typedef data::pixel<float>               pixel_f32;
-		typedef data::sample_recorder<pixel_f32> sample_recorder;
-		typedef data::image<sample_recorder>     image;
+		typedef data::pixel<float>         pixel_f32;
+		typedef data::image<pixel_f32>     image_t;
 
 		// the world we loaded
 		world::world world;
@@ -93,14 +92,18 @@ class scene : public boost::noncopyable
 		void draw();
 
 		// accessor
-		const image& samples() const { return samples_; }
+		const image_t& image() const { return image_; }
+		long n_samples() const { return n_samples_; }
 
 	protected:
-		// samples currently drawn
-		image samples_;
+		// current image
+		image_t image_;
 
 		// the current state of the MH chain
 		mh_state current_state_;
+
+		// number of samples drawn
+		long n_samples_;
 
 		// camera position, pose and cached parameters
 		data::vec3_f32 camera_origin_;
@@ -133,16 +136,20 @@ class scene : public boost::noncopyable
 		// trace a ray through the world for a maximum of max_bounces
 		// add a bounce to out for every bounce
 		template<typename OutputIterator>
-		void trace_ray(ray& r, int max_bounces, OutputIterator out);
+		void trace_ray(ray& r, int max_bounces, OutputIterator out) const;
 
 		// MH-related methods
 
-		// generate an initial light -> eye path using bidirectional path tracing
-		void generate_initial_path(path& out_p) const;
+		// sample an initial light -> eye path using bidirectional path tracing. return false if the path could not be joined
+		bool generate_initial_path(path& out_p, float im_x, float im_y) const;
 
 		// given a path through the world, compute the luminance transfer for that path
 		// i.e., the value of f(X) for that path.
 		float luminance_transfer(const path& p) const;
+
+		// perform a bidirectional mutation on the passed path. return
+		// false if this mutation should immediately be rejected.
+		bool bidirectional_mutate(path& p) const;
 };
 
 }

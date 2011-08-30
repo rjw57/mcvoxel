@@ -24,24 +24,28 @@ template<typename T>
 vec3<T> vec3<T>::operator+=(const vec3<T>& p)
 {
 	x += p.x; y += p.y; z += p.z;
+	return *this;
 }
 
 template<typename T>
 vec3<T> vec3<T>::operator-=(const vec3<T>& p)
 {
 	x -= p.x; y -= p.y; z -= p.z;
+	return *this;
 }
 
 template<typename T>
 vec3<T> vec3<T>::operator*=(const T& v)
 {
 	x *= v; y *= v; z *= v;
+	return *this;
 }
 
 template<typename T>
 vec3<T> vec3<T>::operator/=(const T& v)
 {
 	x /= v; y /= v; z /= v;
+	return *this;
 }
 
 template<typename T>
@@ -53,83 +57,52 @@ vec3<T>::operator Vector () const
 // PIXEL
 
 template<typename T>
-pixel<T> pixel<T>::operator + (const pixel<T>& p) const
+pixel<T>::pixel()
+	: r(), g(), b()
+{ }
+
+template<typename T>
+pixel<T>::pixel(const T& r, const T& g, const T& b)
+	: r(r), g(g), b(b)
+{ }
+
+template<typename T>
+pixel<T>::pixel(const Vector& v)
+	: r(pt_vector_get_x(v)), g(pt_vector_get_y(v)), b(pt_vector_get_z(v))
+{ }
+
+template<typename T>
+pixel<T> pixel<T>::operator+=(const pixel<T>& p)
 {
-	pixel<T> rv;
-	rv.r = r + p.r;
-	rv.g = g + p.g;
-	rv.b = b + p.b;
-	return rv;
+	r += p.r; g += p.g; b += p.b;
+	return *this;
 }
 
 template<typename T>
-pixel<T> pixel<T>::operator - (const pixel<T>& p) const
+pixel<T> pixel<T>::operator-=(const pixel<T>& p)
 {
-	pixel<T> rv;
-	rv.r = r - p.r;
-	rv.g = g - p.g;
-	rv.b = b - p.b;
-	return rv;
+	r -= p.r; g -= p.g; b -= p.b;
+	return *this;
 }
 
 template<typename T>
-pixel<T> pixel<T>::operator / (const pixel<T>& p) const
+pixel<T> pixel<T>::operator*=(const T& v)
 {
-	pixel<T> rv;
-	rv.r = r / p.r;
-	rv.g = g / p.g;
-	rv.b = b / p.b;
-	return rv;
+	r *= v; g *= v; b *= v;
+	return *this;
 }
 
 template<typename T>
-pixel<T> pixel<T>::operator * (const pixel<T>& p) const
+pixel<T> pixel<T>::operator/=(const T& v)
 {
-	pixel<T> rv;
-	rv.r = r * p.r;
-	rv.g = g * p.g;
-	rv.b = b * p.b;
-	return rv;
+	r /= v; g /= v; b /= v;
+	return *this;
 }
 
 template<typename T>
-pixel<T> pixel<T>::operator + (const T& v) const
+pixel<T>::operator Vector () const
 {
-	pixel<T> rv;
-	rv.r = r + v;
-	rv.g = g + v;
-	rv.b = b + v;
-	return rv;
-}
-
-template<typename T>
-pixel<T> pixel<T>::operator - (const T& v) const
-{
-	pixel<T> rv;
-	rv.r = r - v;
-	rv.g = g - v;
-	rv.b = b - v;
-	return rv;
-}
-
-template<typename T>
-pixel<T> pixel<T>::operator / (const T& v) const
-{
-	pixel<T> rv;
-	rv.r = r / v;
-	rv.g = g / v;
-	rv.b = b / v;
-	return rv;
-}
-
-template<typename T>
-pixel<T> pixel<T>::operator * (const T& v) const
-{
-	pixel<T> rv;
-	rv.r = r * v;
-	rv.g = g * v;
-	rv.b = b * v;
-	return rv;
+	return pt_vector_make(r, g, b, 0.f);
 }
 
 template<typename T>

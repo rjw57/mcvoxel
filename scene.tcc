@@ -9,7 +9,7 @@ namespace scene
 {
 
 template<typename OutputIterator>
-void scene::trace_ray(ray& in_r, int max_bounces, OutputIterator out)
+void scene::trace_ray(ray& in_r, int max_bounces, OutputIterator out) const
 {
 	world_position bounce_pos;
 	octree::sub_location sub_loc;

@@ -82,17 +82,17 @@ struct main
 
 		std::string out_stem(options["output"].as<std::string>());
 
-		const scene::scene::image& samples(scene.samples());
+		const scene::scene::image_t& image(scene.image());
 
-		int w(samples.width), h(samples.height);
+		int w(image.width), h(image.height);
 
 		// rationale: a uniformly bright sky (with integral 4*pi) will result in a lambertian surface
 		// having brightness 1/pi => want to scale brightness by 1/pi == 4/integral
 		float lum_scale = 4.f / scene.sky.lum_integral();
-		data::image<pixel_u8> tone_mapped(samples.width, samples.height);
+		data::image<pixel_u8> tone_mapped(image.width, image.height);
 		for(int32_t idx=0; idx<w*h; ++idx)
 		{
-			const pixel_f32& mean = samples.pixels[idx].sample_mean;
+			const pixel_f32& mean = image.pixels[idx] / scene.n_samples();
 			pixel_u8& out = tone_mapped.pixels[idx];
 
 			pixel_f32 fout = mean * lum_scale;
@@ -204,7 +204,7 @@ struct main
 		try
 		{
 			const off_t n_passes = options["num-passes"].as<int>();
-			const off_t n_samples_per_pass = scene.samples().width * scene.samples().height;
+			const off_t n_samples_per_pass = scene.image().width * scene.image().height;
 
 			for(off_t pass_idx = 0; pass_idx < n_passes; ++pass_idx)
 			{
