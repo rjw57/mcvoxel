@@ -1,3 +1,4 @@
+#include <cfloat>
 #include <cmath>
 #include <deque>
 #include <iterator>
@@ -325,27 +326,42 @@ bool scene::visible(const Vector& a, const Vector& b) const
 	Vector norm_delta = pt_vector_normalise3(delta);
 	float mag_delta = pt_vector_get_w(pt_vector_w_sqrt(pt_vector_dot3(delta, delta)));
 
-	// create a ray
-	ray test_ray;
+	// create a ray from a to b and b to a
+	ray a_to_b, b_to_a;
 	make_ray(pt_vector_get_x(a), pt_vector_get_y(a), pt_vector_get_z(a),
 			pt_vector_get_x(norm_delta), pt_vector_get_y(norm_delta), pt_vector_get_z(norm_delta),
-			&test_ray);
+			&a_to_b);
+	make_ray(pt_vector_get_x(b), pt_vector_get_y(b), pt_vector_get_z(b),
+			-pt_vector_get_x(norm_delta), -pt_vector_get_y(norm_delta), -pt_vector_get_z(norm_delta),
+			&b_to_a);
+
+	// by default assume we don't intersect - this might be the case when a
+	// or b is not on the surface and so one of the rays may fly striaght
+	// off into space.
+	float mag_a2b_hit_delta = FLT_MAX, mag_b2a_hit_delta = FLT_MAX;
 
 	// cast it...
-	octree::sub_location sl; data::block bl;
-	data::vec3_f32 normal;
-	if(!world::cast_ray(world, test_ray, sl, bl, normal))
-		return false; // (shouldn't really happen I think)
+	octree::sub_location a2bl, b2al; data::block bl; data::vec3_f32 normal;
 
-	// where did we hit?
-	Vector hit = pt_vector_make(sl.coords[0], sl.coords[1], sl.coords[2], 0.f);
+	if(world::cast_ray(world, a_to_b, a2bl, bl, normal))
+	{
+		// where did we hit and how far away was that?
+		Vector a2b_hit = pt_vector_make(a2bl.coords[0], a2bl.coords[1], a2bl.coords[2], 0.f);
+		Vector a2b_hit_delta = pt_vector_sub(a2b_hit, a);
+		mag_a2b_hit_delta = pt_vector_get_w(pt_vector_w_sqrt(pt_vector_dot3(a2b_hit_delta, a2b_hit_delta)));
+	}
+	
+	if(world::cast_ray(world, b_to_a, b2al, bl, normal))
+	{
+		// where did we hit and how far away was that?
+		Vector b2a_hit = pt_vector_make(b2al.coords[0], b2al.coords[1], b2al.coords[2], 0.f);
+		Vector b2a_hit_delta = pt_vector_sub(b2a_hit, b);
+		mag_b2a_hit_delta = pt_vector_get_w(pt_vector_w_sqrt(pt_vector_dot3(b2a_hit_delta, b2a_hit_delta)));
+	}
 
-	// how far away was that?
-	Vector hit_delta = pt_vector_sub(hit, a);
-	float mag_hit_delta = pt_vector_get_w(pt_vector_w_sqrt(pt_vector_dot3(hit_delta, hit_delta)));
-
-	// bit of a HACK here...
-	return mag_hit_delta >= mag_delta;
+	// now the logic here is that if both of these deltas is >0.5 x the delta from a to b, there can't be anything
+	// in the way
+	return (mag_a2b_hit_delta > 0.5f*mag_delta) && (mag_b2a_hit_delta > 0.5f*mag_delta);
 }
 
 bool scene::sky_visible(const Vector& p, const Vector& dir) const
