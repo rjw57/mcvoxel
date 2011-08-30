@@ -62,11 +62,6 @@ bool scene::bounce_ray(ray& incident, bounce& bounce) const
 	bounce.where.node_ext = sub_loc.node_extent;
 	bounce.where.node_block = block;
 
-	bounce.incident_dir = data::vec3_f32(incident.i, incident.j, incident.k);
-
-	// Lambertian BRDF (cosine term is wrapped in luminance transfer function)
-	bounce.brdf = 1.f;
-
 	// choose a new ray direction
 	bounce.bounce_dir = pt_sampling_cosine(norm);
 
@@ -150,16 +145,11 @@ void scene::draw()
 				bounce& last_sky(p.bounces[first_eye_idx-1]);
 				Vector sky_to_eye = pt_vector_normalise3(
 						pt_vector_sub(first_eye.where.pos, last_sky.where.pos));
-				first_eye.incident_dir = sky_to_eye;
 				last_sky.bounce_dir = sky_to_eye;
-
-				// FIXME: Update BRDF when we support them
 			}
 			else
 			{
-				first_eye.incident_dir = sky_dir;
-
-				// FIXME: Update BRDF when we support them
+				p.sky_dir = sky_dir;
 			}
 
 			// record the sky sample times luminance transfer
@@ -273,16 +263,16 @@ float scene::luminance_transfer(const path& p) const
 		const bounce& first_bounce(p.bounces.front());
 
 		// extract position and normal of bounce
-		Vector p = first_bounce.where.pos, n = first_bounce.where.norm;
+		Vector pos = first_bounce.where.pos, norm = first_bounce.where.norm;
 
 		// direction _to_ sky from bounce
-		Vector sky_dir = pt_vector_neg(first_bounce.incident_dir);
+		Vector sky_dir = pt_vector_neg(p.sky_dir);
 
 		// if no sky visibility, no path
-		if(!sky_visible(p, sky_dir))
+		if(!sky_visible(pos, sky_dir))
 			return 0.f;
 
-		transfer *= pt_vector_get_w(pt_vector_dot3(n, sky_dir));
+		transfer *= pt_vector_get_w(pt_vector_dot3(norm, sky_dir));
 	}
 
 	// handle the bounce-to-bounce differential beam throughput, starting from the first bounce
@@ -292,6 +282,7 @@ float scene::luminance_transfer(const path& p) const
 
 		// work out the position and normal of the first vertex.
 		Vector start_point = b_it->where.pos, start_normal = b_it->where.norm;
+		Vector start_bounce = b_it->bounce_dir;
 
 		// for the remaining vertices...
 		BOOST_FOREACH(const bounce& bounce, std::make_pair(++b_it, p.bounces.end()))
@@ -307,12 +298,12 @@ float scene::luminance_transfer(const path& p) const
 			float recip_delta_sq = pt_vector_get_w(pt_vector_w_reciprocal(pt_vector_dot3(delta, delta)));
 
 			// what is the normalised delta from start -> end, i.e. this bounce's incident dir
-			Vector end_incident_dir = bounce.incident_dir;
+			Vector end_bounce = bounce.bounce_dir;
 
 			// work out cosine delta to normal for start and end
 			transfer *= pt_vector_get_w(pt_vector_abs(pt_vector_mul(
-							pt_vector_dot3(start_normal, end_incident_dir),
-							pt_vector_dot3(end_normal, pt_vector_neg(end_incident_dir)))));
+							pt_vector_dot3(start_normal, start_bounce),
+							pt_vector_dot3(end_normal, pt_vector_neg(start_bounce)))));
 
 			// multiply in 1/||end - start||^2
 			transfer *= recip_delta_sq;
@@ -320,6 +311,7 @@ float scene::luminance_transfer(const path& p) const
 			// prepare for the next iteration
 			start_point = end_point;
 			start_normal = end_normal;
+			start_bounce = end_bounce;
 		}
 	}
 

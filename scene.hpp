@@ -27,10 +27,9 @@ struct world_position
 // a record of one bounce
 struct bounce
 {
-	world_position where;        // where the bounce ocurred
-	data::vec3_f32 incident_dir; // incident direction (pointing into surface)
-	data::vec3_f32 bounce_dir;   // bounce direction (pointing out of surface)
-	float          brdf;         // the value of the BRDF for this bounce
+	                           // incident bounce direction is implied by previous link in the chain
+	world_position where;      // where the bounce ocurred
+	data::vec3_f32 bounce_dir; // bounce direction (pointing out of surface)
 };
 
 // a path from a light source to the eye. The path either starts at the sky (in which case from_sky is true)
@@ -51,8 +50,9 @@ struct path
 	flag_collection            known_visible;
 #endif
 
-	// if true, the incident_direction of the first bounce is from the sky. Otherwise, ignore the sky.
+	// if true, there is a starting bounce from the sky along sky_dir (i.e. sky_dir points *to* the first bounce)
 	bool                       from_sky;
+	data::vec3_f32             sky_dir;
 
 	// eye position: included for completeness although for the moment this is just the scene camera
 	// location.
