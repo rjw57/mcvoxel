@@ -32,6 +32,10 @@ pkg_check_modules(GTHREAD REQUIRED gthread-2.0)
 include_directories(${GTHREAD_INCLUDE_DIRS})
 link_directories(${GTHREAD_LIBRARY_DIRS})
 
+pkg_check_modules(EIGEN eigen3 REQUIRED)
+include_directories(${EIGEN_INCLUDE_DIRS})
+link_directories(${EIGEN_LIBRARY_DIRS})
+
 # Generic third-party library includes
 include_directories(third-party)
 
