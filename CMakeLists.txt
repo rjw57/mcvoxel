@@ -53,13 +53,6 @@ add_library(util
 	util/vector.c
 )
 
-include_directories(${CMAKE_CURRENT_SOURCE_DIR})
-add_executable(voxel
-	io.cpp
-	main.cpp
-	octree.cpp
-)
-
 # Fast Ray/Axis-Aligned Bounding Box Overlap Tests using Ray Slopes
 # http://jgt.akpeters.com/papers/EisemannEtAl07/
 add_library(rayslope
@@ -70,8 +63,18 @@ add_library(rayslope
 	third-party/rayslope/slopeint_mul.cpp
 )
 
-target_link_libraries(voxel
+include_directories(${CMAKE_CURRENT_SOURCE_DIR})
+add_library(mcvoxel
+	io.cpp
+	octree.cpp
+)
+target_link_libraries(mcvoxel
 	c10t-mc c10t-image rayslope hdrloader util
 	${Boost_FILESYSTEM_LIBRARY} ${Boost_SYSTEM_LIBRARY} ${Boost_IOSTREAMS_LIBRARY}
 	${ZLIB_LIBRARY} ${GLIB_LIBRARIES} ${GTHREAD_LIBRARIES} ${PNG_LIBRARIES}
 )
+
+add_executable(voxel
+	main.cpp
+)
+target_link_libraries(voxel mcvoxel)

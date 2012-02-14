@@ -817,7 +817,6 @@ struct main_program
 		{
 			std::cout << "pass " << sample_idx+1 << "/" << n_samples << std::endl;
 
-#			pragma omp parallel for schedule(dynamic, 1024)
 			for(int32_t idx=0; idx<w*h; ++idx)
 			{
 				int x = idx % w;
