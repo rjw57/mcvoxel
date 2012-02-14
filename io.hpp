@@ -1,9 +1,13 @@
 #ifndef IO_HPP
 #define IO_HPP
 
+#include <boost/iostreams/device/file.hpp>
+#include <boost/iostreams/filtering_stream.hpp>
+#include <boost/iostreams/filter/zlib.hpp>
 #include <iostream>
 
 #include "datamodel.hpp"
+#include "octree.hpp"
 
 namespace io
 {
@@ -24,6 +28,33 @@ namespace nbo
 	std::istream& read(std::istream& is, uint16_t& r_val);
 	std::istream& read(std::istream& is, int32_t& r_val);
 	std::istream& read(std::istream& is, int16_t& r_val);
+}
+
+/// @brief Load a set of octree::crystalised_octree instances in from a filename.
+///
+/// @tparam OutputIterator
+/// @param filename
+/// @param output
+template<typename OutputIterator>
+void load_crystal_octrees(
+		const char* filename,
+		OutputIterator output)
+{
+	namespace bio = boost::iostreams;
+	bio::filtering_istream input;
+	input.push(bio::zlib_decompressor());
+	input.push(bio::file_source(filename));
+
+	uint32_t n_trees;
+	io::nbo::read(input, n_trees);
+	std::cout << "tree count: " << n_trees << std::endl;
+	for(size_t i=0; i<n_trees; ++i, ++output)
+	{
+		octree::crystalised_octree tree(0, octree::location(0,0,0));
+		tree.deserialise(input);
+		*output = tree;
+		std::cout << " - tree " << i+1 << " loaded." << std::endl;
+	}
 }
 
 }

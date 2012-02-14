@@ -77,5 +77,8 @@ target_link_libraries(mcvoxel
 add_executable(map2octree tools/map2octree.cpp)
 target_link_libraries(map2octree mcvoxel)
 
+add_executable(simple_path_trace tools/simple_path_trace.cpp)
+target_link_libraries(simple_path_trace mcvoxel)
+
 add_executable(voxel main.cpp)
 target_link_libraries(voxel mcvoxel)
