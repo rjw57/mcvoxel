@@ -74,7 +74,8 @@ target_link_libraries(mcvoxel
 	${ZLIB_LIBRARY} ${GLIB_LIBRARIES} ${GTHREAD_LIBRARIES} ${PNG_LIBRARIES}
 )
 
-add_executable(voxel
-	main.cpp
-)
+add_executable(map2octree tools/map2octree.cpp)
+target_link_libraries(map2octree mcvoxel)
+
+add_executable(voxel main.cpp)
 target_link_libraries(voxel mcvoxel)
