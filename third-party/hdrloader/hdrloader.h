@@ -1,3 +1,5 @@
+#ifndef MC_VOXEL_THIRD_PARTY_HDRLOADER_HDRLOADER_H__
+#define MC_VOXEL_THIRD_PARTY_HDRLOADER_HDRLOADER_H__
 
 /***********************************************************************************
 	Created:	17:9:2002
@@ -19,3 +21,4 @@ public:
 	static bool load(const char *fileName, HDRLoaderResult &res);
 };
 
+#endif // MC_VOXEL_THIRD_PARTY_HDRLOADER_HDRLOADER_H__
