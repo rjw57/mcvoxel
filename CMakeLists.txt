@@ -36,35 +36,16 @@ pkg_check_modules(EIGEN eigen3 REQUIRED)
 include_directories(${EIGEN_INCLUDE_DIRS})
 link_directories(${EIGEN_LIBRARY_DIRS})
 
-# Generic third-party library includes
-include_directories(third-party)
-
-# Code from c10t to load level files
-include_directories(third-party/c10t/src)
-add_subdirectory(third-party/c10t/src/mc)
-add_subdirectory(third-party/c10t/src/nbt)
-
-# HACK: Create an 'image' library with just enough of c10t in it to link.
-add_library(c10t-image third-party/c10t/src/image/color.cpp)
-
-# HDR image support
-add_library(hdrloader third-party/hdrloader/hdrloader.cpp)
+# Third-party libraries
+add_subdirectory(third-party)
+include_directories("${CMAKE_CURRENT_SOURCE_DIR}/third-party")
+include_directories("${CMAKE_CURRENT_SOURCE_DIR}/third-party/c10t/src")
 
 # Generic utility functions
 add_library(util
 	util/common.c
 	util/sampling.c
 	util/vector.c
-)
-
-# Fast Ray/Axis-Aligned Bounding Box Overlap Tests using Ray Slopes
-# http://jgt.akpeters.com/papers/EisemannEtAl07/
-add_library(rayslope
-	third-party/rayslope/aabox.cpp
-	third-party/rayslope/ray.cpp
-	third-party/rayslope/slope.cpp
-	third-party/rayslope/slopeint_div.cpp
-	third-party/rayslope/slopeint_mul.cpp
 )
 
 add_subdirectory(mcvoxel)
