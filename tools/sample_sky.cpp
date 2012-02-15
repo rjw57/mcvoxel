@@ -1,9 +1,9 @@
-#include <camera.hpp>
-#include <datamodel.hpp>
+#include <mcvoxel/camera.hpp>
+#include <mcvoxel/datamodel.hpp>
 #include <Eigen/Dense>
-#include <io.hpp>
+#include <mcvoxel/io.hpp>
 #include <iostream>
-#include <sky.hpp>
+#include <mcvoxel/sky.hpp>
 #include <stdlib.h>
 #include <vector>
 

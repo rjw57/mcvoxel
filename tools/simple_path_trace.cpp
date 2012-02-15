@@ -1,16 +1,16 @@
 #include <boost/foreach.hpp>
-#include <camera.hpp>
+#include <mcvoxel/camera.hpp>
 #include <cmath>
 #include <deque>
 #include <Eigen/Dense>
 #include <iterator>
 #include <iostream>
-#include <octree.hpp>
-#include <sky.hpp>
-#include <sampling.hpp>
+#include <mcvoxel/octree.hpp>
+#include <mcvoxel/sky.hpp>
+#include <mcvoxel/sampling.hpp>
 #include <stdlib.h>
 #include <vector>
-#include <world.hpp>
+#include <mcvoxel/world.hpp>
 
 namespace mcvoxel
 {

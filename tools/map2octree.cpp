@@ -16,9 +16,9 @@
 #include <mc/utils.hpp>
 #include <mc/world.hpp>
 
-#include "datamodel.hpp"
-#include "io.hpp"
-#include "octree.hpp"
+#include <mcvoxel/datamodel.hpp>
+#include <mcvoxel/io.hpp>
+#include <mcvoxel/octree.hpp>
 
 const int CHUNK_SIZE = 16;
 
