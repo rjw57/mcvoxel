@@ -6,25 +6,49 @@
 #include <iterator>
 #include <iostream>
 #include <octree.hpp>
+#include <sky.hpp>
+#include <sampling.hpp>
 #include <stdlib.h>
 #include <vector>
 #include <world.hpp>
 
-typedef Eigen::Vector3f pixel_sample;
-typedef Eigen::aligned_allocator<Eigen::Vector3f> pixel_sample_allocator;
-typedef std::deque<pixel_sample, pixel_sample_allocator> pixel_sample_deque;
+namespace mcvoxel
+{
+
+template<typename OutputIterator>
+void trace(const ray& r, const world& w, OutputIterator bounces, int max_bounces = 5)
+{
+	ray current_ray(r);
+	for(int n_bounces = 0; n_bounces < max_bounces; ++n_bounces, ++bounces)
+	{
+		surface_location intersection;
+		if(!w.intersect(current_ray, intersection))
+			return;
+		*bounces = intersection;
+
+		// choose new ray
+		current_ray = ray(intersection.position,
+				  cosine_weighted_hemisphere_direction(intersection.normal));
+	}
+}
+
+}
 
 int main(int argc, char** argv)
 {
-	if(argc != 3)
+	if(argc != 4)
 	{
-		std::cerr << "syntax: " << argv[0] << " input.oct output.ppm" << std::endl;
+		std::cerr << "syntax: " << argv[0] << " input.oct sky.hdr output.ppm" << std::endl;
 		return EXIT_FAILURE;
 	}
 
 	// Load the world
 	std::cout << "Loading word from: " << argv[1] << std::endl;
 	mcvoxel::world world(argv[1]);
+
+	// Load the sky
+	std::cout << "Loading sky from: " << argv[2] << std::endl;
+	mcvoxel::sky sky(argv[2]);
 
 	// Size of output
 	const int w(850), h(480);
@@ -44,41 +68,78 @@ int main(int argc, char** argv)
 	// Create a collection of pixel samples which is 3x(w*h)
 	Eigen::ArrayXXf samples(3, w*h);
 
-	for(int py=0; py<h; ++py)
+	for(int j=0; j<32; ++j)
 	{
-		float y(-static_cast<float>(py) + 0.5f * static_cast<float>(h));
-		for(int px=0; px<w; ++px)
+		std::cout << "j: " << j << std::endl;
+		for(int i=0; i<w*h; ++i)
 		{
-			float x(static_cast<float>(px) - 0.5f * static_cast<float>(w));
-			int idx = py*w + px;
+			// choose some pixel
+			float x(mcvoxel::uniform_real(-0.5f*w, 0.5f*w));
+			float y(mcvoxel::uniform_real(-0.5f*h, 0.5f*h));
+			int px = static_cast<int>(floor(x + 0.5f*w));
+			int py = static_cast<int>(floor(-y + 0.5f*h));
 
-			mcvoxel::ray eye_ray(camera.eye_ray(x,y));
-			mcvoxel::surface_location intersection;
-			if(!world.intersect(eye_ray, intersection))
+			// in case of rounding error
+			if((px < 0) || (px >= w) || (py < 0) || (py >= h))
 				continue;
 
-			float delta = std::max(0.f, (intersection.position - eye_ray.origin()).norm() - 128.f);
+			// sample an eye ray
+			mcvoxel::ray starting_ray(camera.eye_ray(x,y));
+			Eigen::Vector3f sample(0.f,0.f,0.f);
 
-			samples(0, idx) = delta;
-			samples(1, idx) = delta;
-			samples(2, idx) = delta;
+			// trace a path
+			std::deque<mcvoxel::surface_location> bounces;
+			mcvoxel::trace(starting_ray, world, std::back_inserter(bounces));
+
+			int n_sky_samples = 6;
+
+			if(!bounces.empty())
+			{
+				const mcvoxel::surface_location& last_bounce(bounces.back());
+				for(int i=0; i<n_sky_samples; ++i)
+				{
+					// choose a sky direction and chrominance
+					Eigen::Vector3f sky_dir, sky_chrominance;
+					sky.sample_direction(sky_dir, sky_chrominance);
+
+					// don't bother if the sky direction faces away from us
+					if(sky_dir.dot(last_bounce.normal) <= 0.f)
+						continue;
+
+					// form a ray from last bounce to sky
+					mcvoxel::ray final_ray(last_bounce.position, sky_dir);
+
+					// if we don't hit anything...
+					mcvoxel::surface_location tmp_loc;
+					if(!world.intersect(final_ray, tmp_loc))
+					{
+						// increment sample
+						sample += sky_chrominance * last_bounce.normal.dot(sky_dir);
+					}
+				}
+			}
+			else
+			{
+				sample += n_sky_samples * sky.value_in_direction(starting_ray.direction());
+			}
+
+			int pidx = py * w + px;
+			samples.matrix().col(pidx) += sample;
 		}
+
+		// Poor-man's tone-mapping
+		Eigen::ArrayXXf tone_mapped_samples((samples / std::max(1e-3f, samples.maxCoeff())).cwiseSqrt());
+
+		std::vector<data::pixel<uint8_t> > pixels(w*h, data::pixel<uint8_t>(0,0,0));
+		for(int i=0; i<w*h; ++i)
+		{
+			pixels[i].r = static_cast<uint8_t>(255.f * tone_mapped_samples(0,i));
+			pixels[i].g = static_cast<uint8_t>(255.f * tone_mapped_samples(1,i));
+			pixels[i].b = static_cast<uint8_t>(255.f * tone_mapped_samples(2,i));
+		}
+		std::ofstream output(argv[3]);
+		io::write_ppm(output, &(pixels[0]), w, h);
 	}
-
-	std::cout << "Rendering done." << std::endl;
-
-	// Poor-man's tone-mapping
-	Eigen::ArrayXXf tone_mapped_samples((samples / std::max(1e-3f, samples.maxCoeff())).cwiseSqrt());
-
-	std::vector<data::pixel<uint8_t> > pixels(w*h, data::pixel<uint8_t>(0,0,0));
-	for(int i=0; i<w*h; ++i)
-	{
-		pixels[i].r = static_cast<uint8_t>(255.f * tone_mapped_samples(0,i));
-		pixels[i].g = static_cast<uint8_t>(255.f * tone_mapped_samples(1,i));
-		pixels[i].b = static_cast<uint8_t>(255.f * tone_mapped_samples(2,i));
-	}
-	std::ofstream output(argv[2]);
-	io::write_ppm(output, &(pixels[0]), w, h);
 
 	return EXIT_SUCCESS;
 }

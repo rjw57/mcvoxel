@@ -61,6 +61,8 @@ struct extent
 		return true;
 	}
 
+	location midpoint() const { return location(loc.x + 0.5f*size, loc.y + 0.5f*size, loc.z + 0.5f*size); }
+
 	::aabox make_aabox() const;
 };
 

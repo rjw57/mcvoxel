@@ -13,6 +13,7 @@ namespace mcvoxel
 struct surface_location
 {
 	Eigen::Vector3f position;
+	Eigen::Vector3f normal;
 };
 
 /// @brief A world composed of one or more crystalised octrees.

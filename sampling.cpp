@@ -28,4 +28,33 @@ Eigen::Vector3f uniform_direction()
 	return Eigen::Vector3f(ct*sp, st*sp, cp);
 }
 
+Eigen::Vector3f cosine_weighted_hemisphere_direction(const Eigen::Vector3f& normal)
+{
+	// method: raise a uniform sampled disk into the hemisphere.
+	float u1 = uniform_real();
+	float r = sqrt(u1);
+	float theta = 2.f * M_PI * uniform_real();
+	float x = r * cos(theta), y = r * sin(theta);
+
+	// a dirty trick for rotating the sample
+	Eigen::Vector3f norm_normal(normal.normalized()), h(norm_normal);
+	if((fabs(h[0]) <= fabs(h[1])) && (fabs(h[0]) <= fabs(h[2])))
+	{
+		h[0] = 1.f;
+	}
+       	else if((fabs(h[1]) <= fabs(h[0])) && (fabs(h[1]) <= fabs(h[2])))
+	{
+		h[1] = 1.f;
+	}
+	else
+	{
+		h[2] = 1.f;
+	}
+
+	Eigen::Vector3f xv = h.cross(normal).normalized();
+	Eigen::Vector3f yv = xv.cross(normal).normalized();
+
+	return x*xv + y*yv + sqrt(std::max(0.f, 1.f-u1)) * norm_normal;
+}
+
 }

@@ -30,6 +30,11 @@ public:
 	/// @param chrominance
 	void sample_direction(Eigen::Vector3f& to_dir, Eigen::Vector3f& chrominance) const;
 
+	/// @brief Return the pixel value in the specified direction.
+	///
+	/// @param direction
+	Eigen::Vector3f value_in_direction(const Eigen::Vector3f& direction) const;
+
 protected:
 	HDRLoaderResult sky_probe_;
 
@@ -42,11 +47,6 @@ protected:
 	/// @param x
 	/// @param y
 	float pixel_solid_angle(int x, int y) const;
-
-	/// @brief Return the pixel value in the specified direction.
-	///
-	/// @param direction
-	Eigen::Vector3f value_in_direction(const Eigen::Vector3f& direction) const;
 };
 
 }

@@ -32,6 +32,25 @@ bool world::intersect(const ray& r, surface_location& intersection) const
 		// Found a location. Extract the position
 		Eigen::Vector3f pos(sub_loc.coords[0], sub_loc.coords[1], sub_loc.coords[2]);
 
+		// Calculate normal
+		octree::location node_centre_l(sub_loc.node_extent.midpoint());
+		Eigen::Vector3f node_centre(node_centre_l.x, node_centre_l.y, node_centre_l.z);
+		Eigen::Vector3f proto_norm(pos-node_centre);
+
+		if((fabs(proto_norm[0]) >= fabs(proto_norm[1])) && (fabs(proto_norm[0]) >= fabs(proto_norm[2])))
+		{
+			proto_norm[1] = proto_norm[2] = 0.f;
+		}
+		else if((fabs(proto_norm[1]) >= fabs(proto_norm[0])) && (fabs(proto_norm[1]) >= fabs(proto_norm[2])))
+		{
+			proto_norm[0] = proto_norm[2] = 0.f;
+		}
+		else
+		{
+			proto_norm[0] = proto_norm[1] = 0.f;
+		}
+		Eigen::Vector3f norm(proto_norm.normalized());
+
 		// Have we already found a location?
 		if(found_intersection)
 		{
@@ -46,6 +65,7 @@ bool world::intersect(const ray& r, surface_location& intersection) const
 
 		// Update the intersection record
 		intersection.position = pos;
+		intersection.normal = norm;
 		found_intersection = true;
 	}
 

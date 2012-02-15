@@ -68,7 +68,7 @@ void sky::sample_direction(Eigen::Vector3f& to_dir, Eigen::Vector3f& chrominance
 	// and hence f(t,p) <= M g(x) for some constant M.
 	//
 	// sampling from g() is easy we may therefore use rejection sampling to sample from f
-	for(int try_idx=0; try_idx<16; ++try_idx)
+	for(int try_idx=0; try_idx<128; ++try_idx)
 	{
 		// sample from g()
 		to_dir = uniform_direction();
@@ -76,7 +76,8 @@ void sky::sample_direction(Eigen::Vector3f& to_dir, Eigen::Vector3f& chrominance
 		// calculate f * sky_norm
 		Eigen::Vector3f sky_pixel = value_in_direction(to_dir);
 		float f = rgb2y(sky_pixel);
-		chrominance = sky_pixel / std::max(std::numeric_limits<float>::epsilon(), f);
+		chrominance = (max_lum_ * sky_pixel) /
+		       	(std::max(std::numeric_limits<float>::epsilon(), f) * integral_);
 
 		// accept? (u < f / (M g(x))) === (u < sky_norm * f / max_lum)
 		if(uniform_real() < (f / max_lum_))
