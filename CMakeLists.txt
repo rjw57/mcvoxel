@@ -70,10 +70,13 @@ add_library(rayslope
 include_directories(${CMAKE_CURRENT_SOURCE_DIR})
 add_library(mcvoxel
 	camera.cpp	camera.hpp
+			colour.hpp
 			datamodel.hpp
 	io.cpp		io.hpp
 	octree.cpp	octree.hpp
 			ray.hpp
+	sampling.cpp	sampling.hpp
+	sky.cpp		sky.hpp
 	world.cpp	world.hpp
 )
 target_link_libraries(mcvoxel
@@ -87,6 +90,9 @@ target_link_libraries(map2octree mcvoxel)
 
 add_executable(simple_path_trace tools/simple_path_trace.cpp)
 target_link_libraries(simple_path_trace mcvoxel)
+
+add_executable(sample_sky tools/sample_sky.cpp)
+target_link_libraries(sample_sky mcvoxel)
 
 add_executable(voxel main.cpp)
 target_link_libraries(voxel mcvoxel)

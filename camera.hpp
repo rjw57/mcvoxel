@@ -138,6 +138,18 @@ public:
 	/// @return 
 	ray eye_ray(float x, float y) const { return ray(centre(), focal_length() * look_at() + x * right() + y * up()); }
 
+	/// @brief Given an eye ray direction, return the pixel through which it passes.
+	///
+	/// If the eye ray is pointing away from the camera's image plane, return \p false. Otherwise, return \p true
+	/// and set \p x and \p y to the image-plane co-ordinates for this point.
+	///
+	/// @sa eye_ray() which is in some sense this member function's inverse.
+	///
+	/// @param direction
+	/// @param x
+	/// @param y
+	bool pixel_coord(const Eigen::Vector3f& direction, float& x, float& y) const;
+
 	/// @brief Create a camera looking in the (0,0,-1) direction with an up direction of (0,1,0) and unit focal
 	/// length.
 	camera()

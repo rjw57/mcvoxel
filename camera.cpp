@@ -34,4 +34,25 @@ void camera::set_centre(Eigen::Vector3f centre)
 	translate(delta);
 }
 
+bool camera::pixel_coord(const Eigen::Vector3f& direction, float& x, float& y) const
+{
+	Eigen::Vector3f centre, look_at, up, right;
+	get_frame(centre, look_at, up, right);
+
+	// check direction actually intersects plane
+	if(direction.dot(look_at) <= 0.f)
+		return false;
+
+	// extract components of direction in camera co-ordinate system
+	float la(look_at.dot(direction)), u(up.dot(direction)), r(right.dot(direction));
+
+	// eye ray direction is f * look_at + x * right + y * up. If the look_at component is la, we need to scale each
+	// component by f / la to get the final result.
+	float f(focal_length());
+	x = (f/la) * r;
+	y = (f/la) * u;
+
+	return true;
+}
+
 }
