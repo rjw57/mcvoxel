@@ -400,8 +400,8 @@ struct main_program
 		//float i(fx), k(fy), j(-0.5f*h);
 		float i(-fx), j(fy), k(h);
 
-		float pitch = 20.f * (2.f*3.14159f/360.f);
-		float yaw = -10.f * (2.f*3.14159f/360.f);
+		float pitch = 10.f * (2.f*3.14159f/360.f);
+		float yaw = 0.f * (2.f*3.14159f/360.f);
 
 		float cp = cos(pitch), sp = sin(pitch);
 		float new_j = cp*j - sp*k, new_k = sp*j + cp*k;
@@ -419,7 +419,8 @@ struct main_program
 		//make_ray(200.f, 107.f, -100.f, i/mag, j/mag, k/mag, &r);
 
 		//make_ray(-20, 73, 122, i/mag, j/mag, k/mag, &r);
-		make_ray(-100, 130, -200, i/mag, j/mag, k/mag, &r);
+		//make_ray(-100, 130, -200, i/mag, j/mag, k/mag, &r);
+		make_ray(0, 128, 0, i/mag, j/mag, k/mag, &r);
 		//make_ray(-100, 500, -100, i/mag, j/mag, k/mag, &r);
 
 		// have 2 bounces of indirect illumination

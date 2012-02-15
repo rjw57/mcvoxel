@@ -69,8 +69,12 @@ add_library(rayslope
 
 include_directories(${CMAKE_CURRENT_SOURCE_DIR})
 add_library(mcvoxel
-	io.cpp
-	octree.cpp
+	camera.cpp	camera.hpp
+			datamodel.hpp
+	io.cpp		io.hpp
+	octree.cpp	octree.hpp
+			ray.hpp
+	world.cpp	world.hpp
 )
 target_link_libraries(mcvoxel
 	c10t-mc c10t-image rayslope hdrloader util
