@@ -79,5 +79,5 @@ target_link_libraries(simple_path_trace mcvoxel)
 add_executable(sample_sky tools/sample_sky.cpp)
 target_link_libraries(sample_sky mcvoxel)
 
-add_executable(voxel main.cpp)
+add_executable(voxel tools/voxel.cpp)
 target_link_libraries(voxel mcvoxel)
