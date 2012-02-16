@@ -1,6 +1,8 @@
 #include <boost/random/mersenne_twister.hpp>
+#include <boost/random/uniform_int.hpp>
 #include <boost/random/uniform_real.hpp>
 #include <boost/random/variate_generator.hpp>
+#include <boost/thread.hpp>
 #include <cmath>
 #include <ctime>
 #include <Eigen/Dense>
@@ -9,12 +11,31 @@
 
 namespace mcvoxel
 {
-static boost::mt19937 rng_(std::time(0));
+
+typedef boost::mt19937 rng_t;
+static boost::thread_specific_ptr<rng_t> rng_ptr_;
+
+inline rng_t& rng_()
+{
+	rng_t* p_rng(rng_ptr_.get());
+	if(NULL == p_rng)
+	{
+		rng_ptr_.reset(new rng_t(std::time(0)));
+	}
+	return *(rng_ptr_.get());
+}
 
 float uniform_real(float first, float last)
 {
 	boost::uniform_real<> uni_dist(first, last);
-	boost::variate_generator<boost::mt19937&, boost::uniform_real<> > uni(rng_, uni_dist);
+	boost::variate_generator<rng_t&, boost::uniform_real<> > uni(rng_(), uni_dist);
+	return uni();
+}
+
+int uniform_int(int first, int last)
+{
+	boost::uniform_int<> uni_dist(first, last + 1); // NOTE! Boost API is inconsistent here
+	boost::variate_generator<rng_t&, boost::uniform_int<> > uni(rng_(), uni_dist);
 	return uni();
 }
 

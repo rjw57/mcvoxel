@@ -12,6 +12,12 @@ namespace mcvoxel
 /// @param last
 float uniform_real(float first = 0.f, float last = 1.f);
 
+/// @brief Draw an integer uniformly from the interval [\p first, \p last).
+///
+/// @param first
+/// @param last
+int uniform_int(int first, int last);
+
 /// @brief Draw a direction uniformly from the unit sphere.
 Eigen::Vector3f uniform_direction();
 

@@ -40,6 +40,11 @@ public:
 	/// @param intersection
 	bool intersect(const ray& r, surface_location& intersection) const;
 
+	/// @brief Convenience overload for intersect() which does not return intersection location.
+	///
+	/// @param r
+	bool intersect(const ray& r) const { surface_location dummy; return intersect(r, dummy); }
+
 protected:
 	std::deque<octree::crystalised_octree> trees_;
 };

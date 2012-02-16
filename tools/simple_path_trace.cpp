@@ -34,22 +34,25 @@ int main(int argc, char** argv)
 
 	// Create a camera
 	mcvoxel::camera camera;
-	camera.set_centre(Eigen::Vector3f(0.f, 128.f, 0.f));
+	camera.set_centre(Eigen::Vector3f(64.f, 100.f, 512.f));
 	camera.set_focal_length(h);
-	camera.yaw_left(190.f * (2.f * M_PI / 360.f));
-	camera.pitch_up(-20.f * (2.f * M_PI / 360.f));
+	camera.yaw_left(10.f * (2.f * M_PI / 360.f));
+	camera.pitch_up(-10.f * (2.f * M_PI / 360.f));
 
 	// What is the ray corresponding to (0,0)
 	mcvoxel::ray origin_ray(camera.eye_ray(0.f,0.f));
 	std::cout << "Camera origin: " << origin_ray.origin().transpose() << '\n';
 	std::cout << "   Looking at: " << origin_ray.direction().transpose() << '\n';
 
-	// Create a collection of pixel samples which is 3x(w*h)
-	Eigen::ArrayXXf samples(3, w*h);
+	// Create a collection of pixel samples which is 4x(w*h). The bottom row giving the sample count for that pixel.
+	Eigen::ArrayXXf samples(4, w*h);
 
-	for(int j=0; j<64; ++j)
+	for(int j=0; j<512; ++j)
 	{
-		std::cout << "iteration: " << j << std::endl;
+		float spp = samples.matrix().row(3).sum() / static_cast<float>(w*h);
+		std::cout << "mean samples per-pixel: " << static_cast<size_t>(spp) << std::endl;
+
+#		pragma omp parallel for schedule(dynamic, w)
 		for(int i=0; i<w*h; ++i)
 		{
 			// choose some pixel
@@ -62,29 +65,65 @@ int main(int argc, char** argv)
 			if((px < 0) || (px >= w) || (py < 0) || (py >= h))
 				continue;
 
-			// sample an eye ray
+			// sample a path from the eye
 			mcvoxel::ray starting_ray(camera.eye_ray(x,y));
+			const size_t max_bounces = 4;
 			mcvoxel::ray finishing_ray;
-			Eigen::Vector3f sample(0.f,0.f,0.f);
-
-			// trace a path
 			std::deque<mcvoxel::surface_location> bounces;
-			const size_t max_bounces = 5;
-			Eigen::Vector3f normalisation;
 			mcvoxel::trace_path(starting_ray, world, max_bounces,
-					    normalisation, finishing_ray, std::back_inserter(bounces));
+					    finishing_ray, std::back_inserter(bounces));
 
-			// check final ray doesn't intersect if necessary
-			mcvoxel::surface_location intersection;
-			if((bounces.size() < max_bounces) || !world.intersect(finishing_ray, intersection))
-				sample += sky.value_in_direction(finishing_ray.direction()).cwiseProduct(normalisation);
+			// This is the sample we build up
+			Eigen::Vector3f sample(0.f,0.f,0.f);
+			int n_samples = 0;
+
+			// Did we escape the world before the maximum number of bounces?
+			if(bounces.size() < max_bounces)
+			{
+				sample += sky.value_in_direction(finishing_ray.direction());
+				++n_samples;
+			}
+
+			if(!bounces.empty())
+			{
+				// Draw a light direction and try to form an explicit light path
+				Eigen::Vector3f sky_dir, sky_sample;
+				sky.sample_direction(sky_dir, sky_sample);
+
+				BOOST_FOREACH(const mcvoxel::surface_location& loc, bounces)
+				{
+					// skip if the light faces away from the bounce surface
+					float cos_theta(loc.normal.dot(sky_dir));
+					if(cos_theta < 0.f)
+						continue;
+
+					// do we hit something on the way?
+					if(world.intersect(mcvoxel::ray(loc.position, sky_dir)))
+						continue;
+
+					// no! add the sample
+					sample += sky_sample * (cos_theta / M_PI);
+				}
+
+				n_samples += bounces.size();
+			}
 
 			int pidx = py * w + px;
-			samples.matrix().col(pidx) += sample;
+#			pragma omp critical
+			{
+				samples.matrix().col(pidx).head<3>() += sample;
+				samples(3, pidx) += static_cast<float>(n_samples);
+			}
 		}
 
+		// normalise samples
+		Eigen::ArrayXXf normalised_samples(samples.topRows<3>());
+		for(int i=0; i<3; ++i)
+			normalised_samples.matrix().row(i).cwiseQuotient(samples.matrix().row(3));
+
 		// Poor-man's tone-mapping
-		Eigen::ArrayXXf tone_mapped_samples((samples / std::max(1e-3f, samples.maxCoeff())).cwiseSqrt());
+		Eigen::ArrayXXf tone_mapped_samples((normalised_samples /
+						     std::max(1e-3f, normalised_samples.maxCoeff())).cwiseSqrt());
 
 		std::vector<data::pixel<uint8_t> > pixels(w*h, data::pixel<uint8_t>(0,0,0));
 		for(int i=0; i<w*h; ++i)

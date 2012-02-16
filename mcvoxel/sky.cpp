@@ -76,8 +76,8 @@ void sky::sample_direction(Eigen::Vector3f& to_dir, Eigen::Vector3f& chrominance
 		// calculate f * sky_norm
 		Eigen::Vector3f sky_pixel = value_in_direction(to_dir);
 		float f = rgb2y(sky_pixel);
-		chrominance = (max_lum_ * sky_pixel) /
-		       	(std::max(std::numeric_limits<float>::epsilon(), f) * integral_);
+		chrominance = (integral_ * sky_pixel) /
+		       	(std::max(std::numeric_limits<float>::epsilon(), f) * max_lum_);
 
 		// accept? (u < f / (M g(x))) === (u < sky_norm * f / max_lum)
 		if(uniform_real() < (f / max_lum_))

@@ -14,7 +14,7 @@ add_library(mcvoxel
 
 target_link_libraries(mcvoxel
 	c10t-mc c10t-image rayslope hdrloader util
-	${Boost_FILESYSTEM_LIBRARY} ${Boost_SYSTEM_LIBRARY} ${Boost_IOSTREAMS_LIBRARY}
+	${Boost_FILESYSTEM_LIBRARY} ${Boost_SYSTEM_LIBRARY} ${Boost_IOSTREAMS_LIBRARY} ${Boost_THREAD_LIBRARY}
 	${ZLIB_LIBRARY} ${GLIB_LIBRARIES} ${GTHREAD_LIBRARIES} ${PNG_LIBRARIES}
 )
 

@@ -11,7 +11,7 @@ if(OPENMP_FOUND)
 endif(OPENMP_FOUND)
 
 # We need to boost libraries.
-find_package(Boost REQUIRED COMPONENTS filesystem iostreams system)
+find_package(Boost REQUIRED COMPONENTS filesystem iostreams system thread)
 include_directories(${Boost_INCLUDE_DIR})
 link_directories(${Boost_LIBRARY_DIRS})
 
