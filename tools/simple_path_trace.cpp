@@ -8,31 +8,10 @@
 #include <mcvoxel/octree.hpp>
 #include <mcvoxel/sky.hpp>
 #include <mcvoxel/sampling.hpp>
+#include <mcvoxel/trace.hpp>
+#include <mcvoxel/world.hpp>
 #include <stdlib.h>
 #include <vector>
-#include <mcvoxel/world.hpp>
-
-namespace mcvoxel
-{
-
-template<typename OutputIterator>
-void trace(const ray& r, const world& w, OutputIterator bounces, int max_bounces = 5)
-{
-	ray current_ray(r);
-	for(int n_bounces = 0; n_bounces < max_bounces; ++n_bounces, ++bounces)
-	{
-		surface_location intersection;
-		if(!w.intersect(current_ray, intersection))
-			return;
-		*bounces = intersection;
-
-		// choose new ray
-		current_ray = ray(intersection.position,
-				  cosine_weighted_hemisphere_direction(intersection.normal));
-	}
-}
-
-}
 
 int main(int argc, char** argv)
 {
@@ -68,9 +47,9 @@ int main(int argc, char** argv)
 	// Create a collection of pixel samples which is 3x(w*h)
 	Eigen::ArrayXXf samples(3, w*h);
 
-	for(int j=0; j<32; ++j)
+	for(int j=0; j<64; ++j)
 	{
-		std::cout << "j: " << j << std::endl;
+		std::cout << "iteration: " << j << std::endl;
 		for(int i=0; i<w*h; ++i)
 		{
 			// choose some pixel
@@ -85,43 +64,20 @@ int main(int argc, char** argv)
 
 			// sample an eye ray
 			mcvoxel::ray starting_ray(camera.eye_ray(x,y));
+			mcvoxel::ray finishing_ray;
 			Eigen::Vector3f sample(0.f,0.f,0.f);
 
 			// trace a path
 			std::deque<mcvoxel::surface_location> bounces;
-			mcvoxel::trace(starting_ray, world, std::back_inserter(bounces));
+			const size_t max_bounces = 5;
+			Eigen::Vector3f normalisation;
+			mcvoxel::trace_path(starting_ray, world, max_bounces,
+					    normalisation, finishing_ray, std::back_inserter(bounces));
 
-			int n_sky_samples = 6;
-
-			if(!bounces.empty())
-			{
-				const mcvoxel::surface_location& last_bounce(bounces.back());
-				for(int i=0; i<n_sky_samples; ++i)
-				{
-					// choose a sky direction and chrominance
-					Eigen::Vector3f sky_dir, sky_chrominance;
-					sky.sample_direction(sky_dir, sky_chrominance);
-
-					// don't bother if the sky direction faces away from us
-					if(sky_dir.dot(last_bounce.normal) <= 0.f)
-						continue;
-
-					// form a ray from last bounce to sky
-					mcvoxel::ray final_ray(last_bounce.position, sky_dir);
-
-					// if we don't hit anything...
-					mcvoxel::surface_location tmp_loc;
-					if(!world.intersect(final_ray, tmp_loc))
-					{
-						// increment sample
-						sample += sky_chrominance * last_bounce.normal.dot(sky_dir);
-					}
-				}
-			}
-			else
-			{
-				sample += n_sky_samples * sky.value_in_direction(starting_ray.direction());
-			}
+			// check final ray doesn't intersect if necessary
+			mcvoxel::surface_location intersection;
+			if((bounces.size() < max_bounces) || !world.intersect(finishing_ray, intersection))
+				sample += sky.value_in_direction(finishing_ray.direction()).cwiseProduct(normalisation);
 
 			int pidx = py * w + px;
 			samples.matrix().col(pidx) += sample;
